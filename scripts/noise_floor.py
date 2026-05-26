@@ -94,6 +94,8 @@ def main() -> None:
         )
         model = KarpathianBase(cfg)
         model.load_state_dict(ckpt["model"])
+        if torch.cuda.is_available():
+            model = model.cuda()
         eval_result = run_hidden_eval(model, karpathian_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
 
         val_bpbs.append(eval_result.val_bpb)

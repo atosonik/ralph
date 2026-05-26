@@ -203,6 +203,8 @@ def op4_hidden_eval(
     )
     model = KarpathianBase(cfg)
     model.load_state_dict(ckpt["model"])
+    if torch.cuda.is_available():
+        model = model.cuda()
     result = run_hidden_eval(model, karpathian_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
     return True, f"val_bpb={result.val_bpb:.4f} bench={result.benchmark_accuracy:.3f}", result
 
