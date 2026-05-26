@@ -1,0 +1,183 @@
+"""
+Karpathian Live — minimal monitoring dashboard.
+
+Reads from the local chain state + run outputs and displays:
+  - Current king + king history
+  - Submission feed with scores and tier
+  - Noise floor reference
+  - Training loss curves from completed runs
+  - Calibration reference timings
+
+Usage:
+    pip install 'karpathian[dashboard]'
+    streamlit run dashboard/app.py -- --karpathian-root /path/to/karpathian
+
+Phase 0.5: reads local JSON files. Phase 1+: reads from Bittensor chain +
+HuggingFace Hub.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+
+
+def load_events(karpathian_root: Path) -> list[dict]:
+    path = karpathian_root / "chain" / "events.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+
+
+def load_king(karpathian_root: Path) -> dict | None:
+    path = karpathian_root / "chain" / "king.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def load_noise_floor(karpathian_root: Path) -> dict | None:
+    for d in ["runs/h100_noise_floor", "runs/noise_floor"]:
+        path = karpathian_root / d / "noise_floor_summary.json"
+        if path.exists():
+            return json.loads(path.read_text())
+    return None
+
+
+def load_calibration(karpathian_root: Path) -> dict | None:
+    for d in ["runs/h100_calibration", "runs"]:
+        path = karpathian_root / d / "calibration.json"
+        if path.exists():
+            return json.loads(path.read_text())
+    return None
+
+
+def load_training_log(log_path: Path) -> pd.DataFrame | None:
+    if not log_path.exists():
+        return None
+    lines = [json.loads(l) for l in log_path.read_text().splitlines() if l.strip()]
+    if not lines:
+        return None
+    return pd.DataFrame(lines)
+
+
+def find_training_runs(karpathian_root: Path) -> list[tuple[str, Path]]:
+    runs_dir = karpathian_root / "runs"
+    if not runs_dir.exists():
+        return []
+    results = []
+    for run_dir in sorted(runs_dir.iterdir()):
+        log = run_dir / "training_log.jsonl"
+        if not log.exists():
+            log = run_dir / "training" / "training_log.jsonl"
+        if log.exists():
+            results.append((run_dir.name, log))
+    return results
+
+
+def main():
+    st.set_page_config(page_title="Karpathian Live", page_icon="⛰️", layout="wide")
+    st.title("⛰️ Karpathian Live")
+    st.caption("Phase 0.5 monitoring dashboard — canonical baseline trajectory, submissions, and network health")
+
+    karpathian_root = Path(sys.argv[-1]) if len(sys.argv) > 1 and Path(sys.argv[-1]).exists() else Path(".")
+
+    # --- Current King ---
+    king = load_king(karpathian_root)
+    col1, col2, col3 = st.columns(3)
+    if king:
+        col1.metric("👑 Current King", king.get("miner_hotkey", "?")[:20])
+        col2.metric("val_bpb", f"{king.get('val_bpb', 0):.4f}")
+        col3.metric("Bundle", king.get("bundle_hash", "?")[:12] + "…")
+    else:
+        st.info("No king crowned yet. Run the smoke test or submit a baseline.")
+
+    st.divider()
+
+    # --- Two columns: events + noise floor ---
+    left, right = st.columns([2, 1])
+
+    with left:
+        st.subheader("📋 Submission Feed")
+        events = load_events(karpathian_root)
+        scored = [e for e in events if e.get("type") == "submission_scored"]
+        if scored:
+            rows = []
+            for e in reversed(scored):
+                rows.append({
+                    "miner": e.get("miner_hotkey", "?")[:20],
+                    "val_bpb": round(e.get("val_bpb", 0), 4),
+                    "quality_gain": round(e.get("quality_gain", 0), 4),
+                    "score": round(e.get("score", 0), 4),
+                    "accepted": "✅" if e.get("accepted_as_king") else "❌",
+                    "decisive": "✅" if e.get("decisively_beats_king") else "—",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.caption("No submissions yet.")
+
+        st.subheader("📜 Chain Events")
+        if events:
+            for e in reversed(events[-20:]):
+                icon = {"initial_king": "👑", "king_changed": "🔄", "submission_scored": "📊",
+                        "submission_rejected": "🚫"}.get(e.get("type", ""), "•")
+                hotkey = e.get("miner_hotkey") or e.get("new_king", {}).get("miner_hotkey", "")
+                st.text(f"{icon} {e['type']:25s}  {hotkey[:16]}")
+        else:
+            st.caption("No events yet.")
+
+    with right:
+        st.subheader("📊 Noise Floor")
+        nf = load_noise_floor(karpathian_root)
+        if nf:
+            st.metric("val_bpb mean", f"{nf['val_bpb']['mean']:.4f}")
+            st.metric("val_bpb std (σ)", f"{nf['val_bpb']['std']:.4f}")
+            st.metric("Margin (2σ)", f"{nf['suggested_noise_floor_margin']:.4f}")
+            st.metric("Runs", nf["runs"])
+            values = nf["val_bpb"]["values"]
+            fig = px.strip(y=values, labels={"y": "val_bpb"}, title="Per-seed val_bpb")
+            fig.update_layout(height=200, margin=dict(t=30, b=10))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.caption("Run noise_floor.py first.")
+
+        st.subheader("🖥️ Calibration")
+        cal = load_calibration(karpathian_root)
+        if cal:
+            st.metric("GPU", cal.get("gpu_name", "CPU"))
+            st.metric("Matmul", f"{cal['matmul_ms']:.3f} ms")
+            st.metric("Attention", f"{cal['attention_ms']:.3f} ms")
+            st.metric("Total", f"{cal['total_ms']:.3f} ms")
+        else:
+            st.caption("No calibration data.")
+
+    st.divider()
+
+    # --- Training Loss Curves ---
+    st.subheader("📈 Training Loss Curves")
+    runs = find_training_runs(karpathian_root)
+    if runs:
+        selected = st.multiselect("Select runs", [name for name, _ in runs],
+                                  default=[runs[-1][0]] if runs else [])
+        if selected:
+            fig = go.Figure()
+            for name, log_path in runs:
+                if name in selected:
+                    df = load_training_log(log_path)
+                    if df is not None and "step" in df.columns and "loss" in df.columns:
+                        fig.add_trace(go.Scatter(x=df["step"], y=df["loss"], mode="lines", name=name))
+            fig.update_layout(xaxis_title="Step", yaxis_title="Loss", height=400)
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.caption("No training runs found yet.")
+
+
+if __name__ == "__main__":
+    main()

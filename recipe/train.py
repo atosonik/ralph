@@ -121,7 +121,25 @@ def build_optimizer(model: torch.nn.Module, cfg: TrainConfig) -> torch.optim.Opt
     )
 
 
-def train(cfg: TrainConfig, out_dir: Path) -> dict:
+def _init_wandb(cfg: TrainConfig, out_dir: Path, use_wandb: bool) -> object | None:
+    if not use_wandb:
+        return None
+    try:
+        import wandb
+        run = wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "karpathian"),
+            name=f"train-{cfg.dim}d-{cfg.n_layers}L-{cfg.total_steps}s",
+            config={k: v for k, v in asdict(cfg).items()},
+            dir=str(out_dir),
+            tags=["proof-test", f"{cfg.dim}d", f"{cfg.n_layers}L"],
+        )
+        return run
+    except Exception as e:
+        print(f"[train] wandb init failed ({e}), continuing without it")
+        return None
+
+
+def train(cfg: TrainConfig, out_dir: Path, use_wandb: bool = False) -> dict:
     set_determinism(cfg.init_seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -133,11 +151,15 @@ def train(cfg: TrainConfig, out_dir: Path) -> dict:
     log_path = out_dir / "training_log.jsonl"
     log_f = log_path.open("w")
 
+    wb_run = _init_wandb(cfg, out_dir, use_wandb)
+
     n_params = model.num_parameters()
     n_params_no_embed = model.num_parameters(exclude_embeddings=True)
     print(f"[train] device={device} params={n_params:,} (no embeddings: {n_params_no_embed:,})")
     print(f"[train] manifest tokens={ds.total_tokens:,} hash={ds.manifest.manifest_hash()[:16]}…")
     print(f"[train] steps={cfg.total_steps} batch={cfg.batch_size} micro={cfg.micro_batch_size} seq={cfg.seq_len}")
+    if wb_run:
+        print(f"[train] wandb: {wb_run.url}")
 
     start = time.time()
     tokens_seen = 0
@@ -176,12 +198,16 @@ def train(cfg: TrainConfig, out_dir: Path) -> dict:
             "elapsed_s": elapsed,
         }
         log_f.write(json.dumps(entry) + "\n")
+        if wb_run:
+            wb_run.log(entry, step=step)
         if step % cfg.log_every == 0 or step == cfg.total_steps - 1:
             print(
                 f"[step {step:4d}/{cfg.total_steps}] loss={step_loss:.4f} lr={lr:.2e} "
                 f"|g|={grad_norm:.2f} tok/s={tok_per_s:,.0f}"
             )
     log_f.close()
+    if wb_run:
+        wb_run.finish()
 
     ckpt_path = out_dir / "checkpoint.pt"
     torch.save({"model": model.state_dict(), "config": asdict(cfg)}, ckpt_path)
@@ -209,6 +235,7 @@ def main() -> None:
     p.add_argument("--total-steps", type=int, default=None)
     p.add_argument("--manifest", type=Path, default=None)
     p.add_argument("--seed", type=int, default=None)
+    p.add_argument("--wandb", action="store_true", help="Log to Weights & Biases (requires `pip install wandb`)")
     args = p.parse_args()
 
     cfg = TrainConfig()
@@ -225,7 +252,7 @@ def main() -> None:
         cfg.init_seed = args.seed
         cfg.data_seed = args.seed
 
-    train(cfg, args.out_dir)
+    train(cfg, args.out_dir, use_wandb=args.wandb)
 
 
 if __name__ == "__main__":

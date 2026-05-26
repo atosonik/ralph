@@ -21,11 +21,22 @@ data = [
     "datasets>=2.19.0",
     "huggingface-hub>=0.23.0",
 ]
+monitoring = [
+    "wandb>=0.17.0",
+]
+dashboard = [
+    "streamlit>=1.35.0",
+    "plotly>=5.22.0",
+    "pandas>=2.1.0",
+]
+hub = [
+    "huggingface-hub>=0.23.0",
+]
 dev = [
     "pytest>=7.4",
     "ruff>=0.4",
 ]
-all = ["karpathian[data,dev]"]
+all = ["karpathian[data,monitoring,dashboard,hub,dev]"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
