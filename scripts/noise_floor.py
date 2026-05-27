@@ -31,13 +31,13 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eval import run_hidden_eval
-from model import KarpathianBase, KarpathianConfig
+from model import AutoRalphBase, AutoRalphConfig
 from proof.runner import run_proof_test
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--karpathian-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--autoralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--runs", type=int, default=10)
     p.add_argument("--base-seed", type=int, default=1000)
     p.add_argument("--config", default="configs/proxy_cpu_smoke.json")
@@ -45,7 +45,7 @@ def main() -> None:
     p.add_argument("--keep-bundles", action="store_true", help="don't delete intermediate run dirs")
     args = p.parse_args()
 
-    karpathian_root = args.karpathian_root.resolve()
+    autoralph_root = args.autoralph_root.resolve()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     val_bpbs: list[float] = []
@@ -56,7 +56,7 @@ def main() -> None:
     for i in range(args.runs):
         seed = args.base_seed + i
         run_id = f"baseline_seed{seed}"
-        sub_dir = karpathian_root / "submissions" / f"noise_{run_id}"
+        sub_dir = autoralph_root / "submissions" / f"noise_{run_id}"
         proof_dir = args.out_dir / f"proof_{run_id}"
         if proof_dir.exists():
             shutil.rmtree(proof_dir)
@@ -74,7 +74,7 @@ def main() -> None:
         print(f"\n[noise_floor] run {i + 1}/{args.runs} (seed={seed})")
         t0 = time.time()
         bundle = run_proof_test(
-            karpathian_root=karpathian_root,
+            autoralph_root=autoralph_root,
             submission_dir=sub_dir,
             out_dir=proof_dir,
         )
@@ -83,7 +83,7 @@ def main() -> None:
         # Hidden eval the produced checkpoint.
         ckpt = torch.load(bundle.checkpoint_path, weights_only=False, map_location="cpu")
         saved = ckpt["config"]
-        cfg = KarpathianConfig(
+        cfg = AutoRalphConfig(
             vocab_size=saved["vocab_size"],
             dim=saved["dim"],
             n_layers=saved["n_layers"],
@@ -92,11 +92,11 @@ def main() -> None:
             ffn_mult=saved["ffn_mult"],
             max_seq_len=saved["max_seq_len"],
         )
-        model = KarpathianBase(cfg)
+        model = AutoRalphBase(cfg)
         model.load_state_dict(ckpt["model"])
         if torch.cuda.is_available():
             model = model.cuda()
-        eval_result = run_hidden_eval(model, karpathian_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
+        eval_result = run_hidden_eval(model, autoralph_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
 
         val_bpbs.append(eval_result.val_bpb)
         benchmarks.append(eval_result.benchmark_accuracy)

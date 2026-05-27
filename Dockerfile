@@ -1,4 +1,4 @@
-# Karpathian proof-test container
+# AutoRalph proof-test container
 #
 # This is the official miner container that runs the canonical training
 # procedure for a submitted patch and produces the attested proof bundle.
@@ -9,23 +9,23 @@
 # doesn't match.
 #
 # Build:
-#   docker build -t karpathian-proof:latest .
+#   docker build -t autoralph-proof:latest .
 #
 # Run a proof test:
 #   docker run --gpus all --rm \
 #     -v /path/to/data:/data:ro \
 #     -v /path/to/submission:/submission:ro \
 #     -v /path/to/output:/output \
-#     karpathian-proof:latest \
+#     autoralph-proof:latest \
 #       --submission /submission --out-dir /output
 #
 # For reproducible builds:
 #   DOCKER_BUILDKIT=1 docker build \
 #     --build-arg BUILDKIT_INLINE_CACHE=1 \
-#     -t karpathian-proof:$(git rev-parse --short HEAD) .
+#     -t autoralph-proof:$(git rev-parse --short HEAD) .
 #
 # The image digest (sha256) is the container measurement:
-#   docker inspect --format='{{.RepoDigests}}' karpathian-proof:latest
+#   docker inspect --format='{{.RepoDigests}}' autoralph-proof:latest
 
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS base
 
@@ -66,7 +66,7 @@ COPY restricted_files.yaml /app/restricted_files.yaml
 WORKDIR /app
 
 # Verify the model code loads.
-RUN python -c "from model import KarpathianBase, KarpathianConfig; print('model import ok')"
+RUN python -c "from model import AutoRalphBase, AutoRalphConfig; print('model import ok')"
 RUN python -c "from proof.runner import run_proof_test; print('proof runner import ok')"
 
 # The entry point is the proof runner.
@@ -79,6 +79,6 @@ CMD ["--help"]
 
 # --- Labels for traceability ---
 ARG GIT_SHA="unknown"
-LABEL org.opencontainers.image.source="https://github.com/KarpathianBase/karpathian"
+LABEL org.opencontainers.image.source="https://github.com/AutoRalphBase/autoralph"
 LABEL org.opencontainers.image.revision="${GIT_SHA}"
-LABEL org.opencontainers.image.description="Karpathian proof-test container — canonical training + attestation"
+LABEL org.opencontainers.image.description="AutoRalph proof-test container — canonical training + attestation"

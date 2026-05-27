@@ -7,7 +7,7 @@ Replaces the local JSON chain with real Bittensor on-chain operations:
   - Handshake nonces committed via subtensor.commit()
   - King state derived from chain weights + off-chain metadata
 
-Karpathian does NOT use the standard axon/dendrite query pattern. Miners
+AutoRalph does NOT use the standard axon/dendrite query pattern. Miners
 submit proof bundles asynchronously (via HuggingFace Hub); validators
 download, score, and set weights on-chain. The "communication" is:
 
@@ -84,7 +84,7 @@ class BittensorChain(ChainInterface):
         before scoring the submission.
         """
         nonce = "0x" + secrets.token_hex(32)
-        commit_data = f"karpathian:handshake:{miner_hotkey}:{patch_hash}:{nonce}"
+        commit_data = f"autoralph:handshake:{miner_hotkey}:{patch_hash}:{nonce}"
         commit_hash = hashlib.sha256(commit_data.encode()).hexdigest()
 
         try:

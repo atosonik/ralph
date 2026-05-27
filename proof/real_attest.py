@@ -182,7 +182,7 @@ def _get_tdx_quote(nonce: str, user_data: str) -> tuple[Optional[str], Optional[
         tdx_dev = "/dev/tdx-guest" if os.path.exists("/dev/tdx-guest") else "/dev/tdx_guest"
         # The tdx-guest device expects a specific ioctl; for now we use the
         # configfs-tsm interface which is more portable across kernel versions.
-        tsm_path = "/sys/kernel/config/tsm/report/karpathian"
+        tsm_path = "/sys/kernel/config/tsm/report/autoralph"
         os.makedirs(tsm_path, exist_ok=True)
         with open(f"{tsm_path}/inblob", "wb") as f:
             f.write(report_data[:64].ljust(64, b"\0"))

@@ -29,19 +29,19 @@ from pathlib import Path
 # Phase 0.5+ replaces this with Bittensor on-chain commitment.
 
 
-def _chain_dir(karpathian_root: Path) -> Path:
-    d = karpathian_root / "chain"
+def _chain_dir(autoralph_root: Path) -> Path:
+    d = autoralph_root / "chain"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def request_handshake_nonce(
-    karpathian_root: Path,
+    autoralph_root: Path,
     miner_hotkey: str,
     patch_hash: str,
 ) -> str:
     """Simulate the on-chain proof-test handshake (§5.4)."""
-    chain = _chain_dir(karpathian_root)
+    chain = _chain_dir(autoralph_root)
     nonce = "0x" + secrets.token_hex(32)
     entry = {
         "type": "proof_test_handshake",
@@ -57,11 +57,11 @@ def request_handshake_nonce(
 
 
 def lookup_handshake(
-    karpathian_root: Path,
+    autoralph_root: Path,
     nonce: str,
 ) -> dict | None:
     """Validator-side: confirm a nonce was committed to the chain."""
-    handshakes = _chain_dir(karpathian_root) / "handshakes.jsonl"
+    handshakes = _chain_dir(autoralph_root) / "handshakes.jsonl"
     if not handshakes.exists():
         return None
     for line in handshakes.read_text().splitlines():
@@ -79,7 +79,7 @@ def lookup_handshake(
 # Phase 0.5+: replaced by real Bittensor hotkey signing (substrate sr25519).
 
 
-def _ensure_keypair(karpathian_root: Path, miner_hotkey: str) -> tuple[bytes, bytes]:
+def _ensure_keypair(autoralph_root: Path, miner_hotkey: str) -> tuple[bytes, bytes]:
     """Return (private_key_bytes, public_key_bytes). Generates and persists on
     first use."""
     try:
@@ -96,7 +96,7 @@ def _ensure_keypair(karpathian_root: Path, miner_hotkey: str) -> tuple[bytes, by
     except ImportError:  # pragma: no cover
         raise RuntimeError("install `cryptography` for Phase 0 signer support") from None
 
-    keys_dir = karpathian_root / "miner" / "keys"
+    keys_dir = autoralph_root / "miner" / "keys"
     keys_dir.mkdir(parents=True, exist_ok=True)
     sk_path = keys_dir / f"{miner_hotkey}.sk"
     pk_path = keys_dir / f"{miner_hotkey}.pk"
@@ -110,7 +110,7 @@ def _ensure_keypair(karpathian_root: Path, miner_hotkey: str) -> tuple[bytes, by
 
 
 def sign_submission(
-    karpathian_root: Path,
+    autoralph_root: Path,
     miner_hotkey: str,
     bundle_hash: str,
     handshake_nonce: str,
@@ -118,7 +118,7 @@ def sign_submission(
     """Returns {signature_hex, public_key_hex}."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-    sk_bytes, pk_bytes = _ensure_keypair(karpathian_root, miner_hotkey)
+    sk_bytes, pk_bytes = _ensure_keypair(autoralph_root, miner_hotkey)
     sk = Ed25519PrivateKey.from_private_bytes(sk_bytes)
     payload = f"{miner_hotkey}|{handshake_nonce}|{bundle_hash}".encode("utf-8")
     sig = sk.sign(payload)
@@ -166,7 +166,7 @@ class SubmissionBundle:
 
 
 def assemble_submission(
-    karpathian_root: Path,
+    autoralph_root: Path,
     miner_hotkey: str,
     submission_dir: Path,
     proof_dir: Path,
@@ -178,7 +178,7 @@ def assemble_submission(
     manifest = json.loads((proof_dir / "bundle_manifest.json").read_text())
     bundle_hash = manifest["bundle_hash"]
     handshake_nonce = manifest["handshake_nonce"]
-    sig = sign_submission(karpathian_root, miner_hotkey, bundle_hash, handshake_nonce)
+    sig = sign_submission(autoralph_root, miner_hotkey, bundle_hash, handshake_nonce)
 
     bundle = SubmissionBundle(
         miner_hotkey=miner_hotkey,
@@ -205,7 +205,7 @@ def main() -> None:
 
     p = argparse.ArgumentParser()
     p.add_argument("command", choices=["handshake", "assemble"])
-    p.add_argument("--karpathian-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--autoralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--miner-hotkey", required=True)
     p.add_argument("--patch", type=Path, help="patch file (for handshake)")
     p.add_argument("--submission-dir", type=Path)
@@ -218,11 +218,11 @@ def main() -> None:
             if args.patch and args.patch.exists()
             else hashlib.sha256(b"").hexdigest()
         )
-        nonce = request_handshake_nonce(args.karpathian_root, args.miner_hotkey, patch_hash)
+        nonce = request_handshake_nonce(args.autoralph_root, args.miner_hotkey, patch_hash)
         print(nonce)
     elif args.command == "assemble":
         bundle = assemble_submission(
-            args.karpathian_root,
+            args.autoralph_root,
             args.miner_hotkey,
             args.submission_dir,
             args.proof_dir,

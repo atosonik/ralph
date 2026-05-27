@@ -15,7 +15,7 @@ This will:
   3. Write a held-out eval shard to eval/private/active_tokens.bin for val_bpb.
   4. Build content-addressed manifest at data/data_manifest.json.
 
-Requires `datasets` package: pip install 'karpathian[data]'
+Requires `datasets` package: pip install 'autoralph[data]'
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def synthetic_stream(seed: int = 1337):
     words = [
         "the", "cat", "sat", "on", "the", "mat", "and", "looked", "around",
         "quietly", "while", "rain", "tapped", "the", "tin", "roof",
-        "Karpathian", "validates", "training", "recipes", "openly",
+        "AutoRalph", "validates", "training", "recipes", "openly",
         "every", "epoch", "the", "container", "attests", "what", "it", "ran",
         "miners", "search", "patches", "validators", "score", "checkpoints",
     ]

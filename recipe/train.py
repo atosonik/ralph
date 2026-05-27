@@ -1,5 +1,5 @@
 """
-Canonical training loop for the Karpathian launch track.
+Canonical training loop for the AutoRalph launch track.
 
 This file is part of the recipe — miners may patch it (subject to the
 restricted-files contract). The proof-test runner invokes this script with a
@@ -29,7 +29,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data import TokenShardDataset
-from model import KarpathianBase, KarpathianConfig
+from model import AutoRalphBase, AutoRalphConfig
 
 
 @dataclass
@@ -99,8 +99,8 @@ def cosine_lr(step: int, cfg: TrainConfig) -> float:
     return cfg.min_lr + 0.5 * (cfg.max_lr - cfg.min_lr) * (1 + math.cos(math.pi * progress))
 
 
-def build_model(cfg: TrainConfig) -> KarpathianBase:
-    return KarpathianBase(KarpathianConfig(
+def build_model(cfg: TrainConfig) -> AutoRalphBase:
+    return AutoRalphBase(AutoRalphConfig(
         vocab_size=cfg.vocab_size,
         dim=cfg.dim,
         n_layers=cfg.n_layers,
@@ -130,7 +130,7 @@ def _init_wandb(cfg: TrainConfig, out_dir: Path, use_wandb: bool) -> object | No
     try:
         import wandb
         run = wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "karpathian"),
+            project=os.environ.get("WANDB_PROJECT", "autoralph"),
             name=f"train-{cfg.dim}d-{cfg.n_layers}L-{cfg.total_steps}s",
             config={k: v for k, v in asdict(cfg).items()},
             dir=str(out_dir),

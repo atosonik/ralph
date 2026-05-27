@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Karpathian Phase 0.5 — H100 bootstrap script
+# AutoRalph Phase 0.5 — H100 bootstrap script
 #
 # Run this on a fresh H100 VM from Shadeform (Lambda, Latitude, etc.).
-# It does everything: clone → install → data prep → noise floor → Karpathian-1.
+# It does everything: clone → install → data prep → noise floor → AutoRalph-1.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/KarpathianBase/karpathian/main/scripts/run_h100.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/AutoRalphBase/autoralph/main/scripts/run_h100.sh | bash
 #
 #   Or, if you've already cloned:
-#   cd karpathian && bash scripts/run_h100.sh
+#   cd autoralph && bash scripts/run_h100.sh
 #
 # Expected wall-clock:
 #   Data prep (~1B tokens):  ~10-20 min
 #   Noise floor (10 seeds):  ~30 min  (proxy config, 500 steps each)
-#   Karpathian-1 training:   ~35 min  (default config, 2000 steps)
+#   AutoRalph-1 training:   ~35 min  (default config, 2000 steps)
 #   Total:                   ~60-90 min
 #
 # Output:
 #   runs/h100_noise_floor/noise_floor_summary.json  — empirical noise floor
-#   runs/h100_karpathian1/                          — Karpathian-1 checkpoint + logs
+#   runs/h100_autoralph1/                          — AutoRalph-1 checkpoint + logs
 #   runs/h100_calibration/calibration.json          — H100 reference timings
 # ============================================================================
 
 set -euo pipefail
 
-REPO_URL="git@github-bitzic:KarpathianBase/karpathian.git"
-WORKDIR="${KARPATHIAN_DIR:-$HOME/karpathian}"
+REPO_URL="git@github-bitzic:AutoRalphBase/autoralph.git"
+WORKDIR="${AUTORALPH_DIR:-$HOME/autoralph}"
 DATA_TOKENS="${DATA_TOKENS:-1000000000}"        # 1B training tokens
 EVAL_TOKENS="${EVAL_TOKENS:-5000000}"           # 5M eval tokens
 NOISE_RUNS="${NOISE_RUNS:-10}"
-KARPATHIAN1_SEED="${KARPATHIAN1_SEED:-1337}"
+AUTORALPH1_SEED="${AUTORALPH1_SEED:-1337}"
 # Two-tier model (whitepaper v1.1 §5.4):
 #   "verified"   = full TDX+nvtrust attestation chain (needs CC-capable H100)
 #   "unverified" = no attestation, scored at α=0.5 (any H100 works)
@@ -38,7 +38,7 @@ KARPATHIAN1_SEED="${KARPATHIAN1_SEED:-1337}"
 TIER="${TIER:-unverified}"
 
 echo "=============================================="
-echo "  Karpathian Phase 0.5 — H100 Bootstrap"
+echo "  AutoRalph Phase 0.5 — H100 Bootstrap"
 echo "=============================================="
 
 # --- Step 0: Clone if needed ---
@@ -93,12 +93,12 @@ python scripts/noise_floor.py \
     --config configs/h100_proxy.json \
     --out-dir runs/h100_noise_floor
 
-# --- Step 5: Karpathian-1 training ---
-echo "[5/5] Training Karpathian-1 (300M params, ~262M tokens)..."
+# --- Step 5: AutoRalph-1 training ---
+echo "[5/5] Training AutoRalph-1 (300M params, ~262M tokens)..."
 python -m recipe.train \
     --config configs/h100_default.json \
-    --out-dir runs/h100_karpathian1 \
-    --seed "$KARPATHIAN1_SEED"
+    --out-dir runs/h100_autoralph1 \
+    --seed "$AUTORALPH1_SEED"
 
 # --- Summary ---
 echo ""
@@ -108,7 +108,7 @@ echo "=============================================="
 echo ""
 echo "Calibration:   runs/h100_calibration/calibration.json"
 echo "Noise floor:   runs/h100_noise_floor/noise_floor_summary.json"
-echo "Karpathian-1:  runs/h100_karpathian1/"
+echo "AutoRalph-1:  runs/h100_autoralph1/"
 echo ""
 
 if [ -f "runs/h100_noise_floor/noise_floor_summary.json" ]; then
@@ -119,19 +119,19 @@ print(f\"Noise floor: mean={nf['val_bpb']['mean']:.4f}  std={nf['val_bpb']['std'
 "
 fi
 
-if [ -f "runs/h100_karpathian1/final_state.json" ]; then
+if [ -f "runs/h100_autoralph1/final_state.json" ]; then
     python -c "
 import json
-fs = json.load(open('runs/h100_karpathian1/final_state.json'))
-print(f\"Karpathian-1: final_loss={fs['final_loss']:.4f}  tokens={fs['tokens_seen']:,}  wall={fs['wall_clock_s']:.0f}s\")
+fs = json.load(open('runs/h100_autoralph1/final_state.json'))
+print(f\"AutoRalph-1: final_loss={fs['final_loss']:.4f}  tokens={fs['tokens_seen']:,}  wall={fs['wall_clock_s']:.0f}s\")
 "
 fi
 
 echo ""
 echo "Next steps:"
-echo "  1. Run the hidden eval on Karpathian-1:"
+echo "  1. Run the hidden eval on AutoRalph-1:"
 echo "     python -c \"..."
 echo "  2. Post results to GitHub Discussions"
 echo "  3. Build + test the Docker container:"
-echo "     docker build -t karpathian-proof:latest ."
+echo "     docker build -t autoralph-proof:latest ."
 echo "  4. (Phase 0.5c) Rent a CC-capable H100 for real TDX+nvtrust attestation"

@@ -1,19 +1,19 @@
-# Phase 0.5 — First H100 Run: Noise Floor, Calibration, and Karpathian-1
+# Phase 0.5 — First H100 Run: Noise Floor, Calibration, and AutoRalph-1
 
 **Date:** May 26, 2026
 **Hardware:** NVIDIA H100 PCIe 80GB (Shadeform / ShadeCloud)
 **Data:** 1B tokens from FineWeb-Edu (sample-10BT), GPT-2 BPE tokenizer
-**Code:** [`KarpathianBase/karpathian`](https://github.com/KarpathianBase/karpathian/tree/v0.5.0) @ [`v0.5.0`](https://github.com/KarpathianBase/karpathian/releases/tag/v0.5.0)
+**Code:** [`AutoRalphBase/autoralph`](https://github.com/AutoRalphBase/autoralph/tree/v0.5.0) @ [`v0.5.0`](https://github.com/AutoRalphBase/autoralph/releases/tag/v0.5.0)
 
 ---
 
 ## What was tested
 
-Phase 0.5 is the first run of the Karpathian protocol on real hardware with real data. Three things were measured:
+Phase 0.5 is the first run of the AutoRalph protocol on real hardware with real data. Three things were measured:
 
 1. **H100 calibration benchmark** — pins the reference timings for the hardware-independent compute unit (whitepaper §5.5)
 2. **Noise floor** — 10 baseline runs with different seeds to empirically set the "decisively beats the king" margin (§5.7)
-3. **Karpathian-1** — the first demonstration model trained on the canonical recipe (§6.8)
+3. **AutoRalph-1** — the first demonstration model trained on the canonical recipe (§6.8)
 
 All runs used the unverified tier (α=0.5) since the H100 instance was not CC-capable. Verified-tier (α=1.0) testing with real TDX+nvtrust attestation is Phase 0.5c.
 
@@ -68,13 +68,13 @@ Per-seed breakdown:
 | 5008 | 1.9377 |
 | 5009 | 1.9557 |
 
-### Karpathian-1 Training
+### AutoRalph-1 Training
 
 The first model trained on the canonical recipe — the proof artifact from whitepaper §6.8.
 
 | Metric | Value |
 |---|---|
-| Model | Karpathian-base (Llama-style: RMSNorm + RoPE + SwiGLU + MHA) |
+| Model | AutoRalph-base (Llama-style: RMSNorm + RoPE + SwiGLU + MHA) |
 | Parameters | **253,872,128 (~254M)** |
 | Config | `h100_default.json` (dim=1024, 16 layers, 16 heads) |
 | Tokens trained | **262,144,000 (~262M)** |
@@ -122,12 +122,12 @@ step  |  loss
 ## How to reproduce
 
 ```bash
-git clone https://github.com/KarpathianBase/karpathian.git
-cd karpathian
+git clone https://github.com/AutoRalphBase/autoralph.git
+cd autoralph
 bash scripts/run_h100.sh
 ```
 
-Requires an H100 GPU. The script handles everything: venv, dependencies, data prep, calibration, noise floor, and Karpathian-1 training. Expected wall-clock: ~6-7 hours total (fp32). Results land in `runs/`.
+Requires an H100 GPU. The script handles everything: venv, dependencies, data prep, calibration, noise floor, and AutoRalph-1 training. Expected wall-clock: ~6-7 hours total (fp32). Results land in `runs/`.
 
 ---
 
@@ -146,12 +146,12 @@ Requires an H100 GPU. The script handles everything: venv, dependencies, data pr
 |---|---|
 | `--wandb` flag in `recipe/train.py` | Live training monitoring at wandb.ai — loss, lr, grad norms, throughput, every step |
 | `dashboard/app.py` | Streamlit dashboard: king status, submission feed, noise floor, loss curves |
-| `miner/hub.py` | HuggingFace Hub integration: upload/download proof bundles to `KarpathianBase/proof-bundles` |
+| `miner/hub.py` | HuggingFace Hub integration: upload/download proof bundles to `AutoRalphBase/proof-bundles` |
 | Two-tier scoring (`validator/scoring.py`) | Verified (α=1.0) vs unverified (α=0.5) credibility model per whitepaper v1.1 §5.4 |
 | Stage 5 audit (`validator/audit.py`) | Score-and-trajectory equivalence checking (not hash equality) per §5.2 |
 
 ---
 
-🔗 **Repo:** [github.com/KarpathianBase/karpathian](https://github.com/KarpathianBase/karpathian)
-🏷️ **This milestone:** [`v0.5.0`](https://github.com/KarpathianBase/karpathian/releases/tag/v0.5.0) — exact code snapshot for this phase
+🔗 **Repo:** [github.com/AutoRalphBase/autoralph](https://github.com/AutoRalphBase/autoralph)
+🏷️ **This milestone:** [`v0.5.0`](https://github.com/AutoRalphBase/autoralph/releases/tag/v0.5.0) — exact code snapshot for this phase
 📄 **Whitepaper:** v1.1 (available in repo)

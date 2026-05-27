@@ -1,4 +1,4 @@
-"""Smoke tests for Karpathian-base — runnable on CPU."""
+"""Smoke tests for AutoRalph-base — runnable on CPU."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from model import KarpathianBase, KarpathianConfig
+from model import AutoRalphBase, AutoRalphConfig
 
 
 def test_forward_pass_runs_on_cpu():
-    cfg = KarpathianConfig(
+    cfg = AutoRalphConfig(
         vocab_size=512,
         dim=64,
         n_layers=2,
@@ -21,7 +21,7 @@ def test_forward_pass_runs_on_cpu():
         head_dim=32,
         max_seq_len=32,
     )
-    model = KarpathianBase(cfg)
+    model = AutoRalphBase(cfg)
     idx = torch.randint(0, cfg.vocab_size, (2, 16))
     targets = torch.randint(0, cfg.vocab_size, (2, 16))
     logits, loss = model(idx, targets=targets)
@@ -32,8 +32,8 @@ def test_forward_pass_runs_on_cpu():
 
 
 def test_default_param_count_around_50M():
-    cfg = KarpathianConfig()
-    model = KarpathianBase(cfg)
+    cfg = AutoRalphConfig()
+    model = AutoRalphBase(cfg)
     n = model.num_parameters()
     n_no_embed = model.num_parameters(exclude_embeddings=True)
     print(f"  default config: {n / 1e6:.1f}M params total, {n_no_embed / 1e6:.1f}M excl embeddings")
@@ -41,10 +41,10 @@ def test_default_param_count_around_50M():
 
 
 def test_backward_pass():
-    cfg = KarpathianConfig(
+    cfg = AutoRalphConfig(
         vocab_size=512, dim=64, n_layers=2, n_heads=2, head_dim=32, max_seq_len=32
     )
-    model = KarpathianBase(cfg)
+    model = AutoRalphBase(cfg)
     idx = torch.randint(0, cfg.vocab_size, (2, 16))
     targets = torch.randint(0, cfg.vocab_size, (2, 16))
     _, loss = model(idx, targets=targets)
@@ -57,10 +57,10 @@ def test_backward_pass():
 
 def test_rope_invariant_to_sequence_length():
     # Same content at different positions should produce different outputs.
-    cfg = KarpathianConfig(
+    cfg = AutoRalphConfig(
         vocab_size=512, dim=64, n_layers=2, n_heads=2, head_dim=32, max_seq_len=32
     )
-    model = KarpathianBase(cfg)
+    model = AutoRalphBase(cfg)
     model.eval()
     idx = torch.randint(0, cfg.vocab_size, (1, 8))
     with torch.no_grad():
@@ -75,7 +75,7 @@ def test_rope_invariant_to_sequence_length():
 
 
 if __name__ == "__main__":
-    print("Running CPU smoke tests for KarpathianBase...")
+    print("Running CPU smoke tests for AutoRalphBase...")
     test_forward_pass_runs_on_cpu()
     test_default_param_count_around_50M()
     test_backward_pass()

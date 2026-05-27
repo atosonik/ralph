@@ -1,16 +1,16 @@
-# Karpathian
+# AutoRalph
 
 A Bittensor subnet for decentralized, autonomous AI research. An open,
 continuously improving training recipe — and the public knowledge corpus
 behind it — built by an autonomous research network on Bittensor.
 
-📄 [Whitepaper (v1.1)](https://github.com/KarpathianBase/karpathian) · 🏷️ [Releases](https://github.com/KarpathianBase/karpathian/releases) · 💬 [Discussions & Results](https://github.com/orgs/KarpathianBase/discussions)
+📄 [Whitepaper (v1.1)](https://github.com/AutoRalphBase/autoralph) · 🏷️ [Releases](https://github.com/AutoRalphBase/autoralph/releases) · 💬 [Discussions & Results](https://github.com/orgs/AutoRalphBase/discussions)
 
-## What Karpathian produces
+## What AutoRalph produces
 
 1. **A canonical training recipe** — a Git repo containing the best-known open recipe for each track (model class × objective). Anyone can clone it and train a model with state-of-the-art settings.
 2. **A public experiment-record corpus** — every submission the network has ever processed, including verified negative results. Searchable, citable, openly licensed.
-3. **A demonstration model lineage** — Karpathian-1, -2, … — open-weights reference models proving the recipe works and the improvement compounds.
+3. **A demonstration model lineage** — AutoRalph-1, -2, … — open-weights reference models proving the recipe works and the improvement compounds.
 
 The subnet and its token fund the production of these artifacts. They are not the deliverable.
 
@@ -19,12 +19,12 @@ The subnet and its token fund the production of these artifacts. They are not th
 | Phase | Status | Key results |
 |---|---|---|
 | **0 — MVP** | ✅ Complete | End-to-end protocol on CPU: model, training, eval, proof-test, validator, scoring, king-change cycle |
-| **0.5 — H100** | ✅ Complete ([`v0.5.0`](https://github.com/KarpathianBase/karpathian/releases/tag/v0.5.0) · [results](https://github.com/orgs/KarpathianBase/discussions/4)) | Real data (1B tokens FineWeb-Edu), noise floor measured (2σ = 0.013 val_bpb), Karpathian-1 trained (254M params, loss 3.82) |
-| **0.5b — Optimization** | ✅ Complete ([`v0.5.1`](https://github.com/KarpathianBase/karpathian/releases/tag/v0.5.1)) | bf16: 3.8× throughput (63K tok/s), same loss. wandb live monitoring, Streamlit dashboard, wandb metrics export in proof bundles |
+| **0.5 — H100** | ✅ Complete ([`v0.5.0`](https://github.com/AutoRalphBase/autoralph/releases/tag/v0.5.0) · [results](https://github.com/orgs/AutoRalphBase/discussions/4)) | Real data (1B tokens FineWeb-Edu), noise floor measured (2σ = 0.013 val_bpb), AutoRalph-1 trained (254M params, loss 3.82) |
+| **0.5b — Optimization** | ✅ Complete ([`v0.5.1`](https://github.com/AutoRalphBase/autoralph/releases/tag/v0.5.1)) | bf16: 3.8× throughput (63K tok/s), same loss. wandb live monitoring, Streamlit dashboard, wandb metrics export in proof bundles |
 | **0.5c — Attestation** | ✅ Code-complete | Real TDX + nvtrust attestation module: auto-detects CC hardware, falls back to mock. Untested on real CC (needs Azure NCC / GCP A3-Confidential) |
-| **0.5d — Testnet** | ✅ Code-complete | Chain abstraction layer: `LocalChain` (JSON) and `BittensorChain` (real testnet/mainnet) backends. Set `KARPATHIAN_CHAIN=bittensor` to switch. Weight setting, hotkey verification, subnet registration. |
+| **0.5d — Testnet** | ✅ Code-complete | Chain abstraction layer: `LocalChain` (JSON) and `BittensorChain` (real testnet/mainnet) backends. Set `AUTORALPH_CHAIN=bittensor` to switch. Weight setting, hotkey verification, subnet registration. |
 | **1.0 — Launch** | Planned | Register subnet, open to external miners, first bounty pilot |
-| **1.1 — SDK** | Planned | `pip install karpathian` on PyPI, CI/CD, changelog, semver |
+| **1.1 — SDK** | Planned | `pip install autoralph` on PyPI, CI/CD, changelog, semver |
 | **1.2 — Docs** | Planned | Documentation site, miner/validator quickstart guides, corpus query tutorials |
 
 ## Architecture (three layers)
@@ -38,7 +38,7 @@ The subnet and its token fund the production of these artifacts. They are not th
                        │ candidate patch
 ┌──────────────────────▼──────────────────────────────┐
 │  Layer 2 — Canonical proof test                     │
-│  Official Karpathian Docker on miner's GPU.         │
+│  Official AutoRalph Docker on miner's GPU.         │
 │  Applies patch to canonical recipe, trains under    │
 │  fixed (seed, data, config), produces checkpoint +  │
 │  training log + calibration + attestation chain.    │
@@ -57,7 +57,7 @@ The subnet and its token fund the production of these artifacts. They are not th
 
 | Path | What | Patchable by miners? |
 |---|---|---|
-| `model/` | Karpathian-base — Llama-style transformer (RMSNorm, RoPE, SwiGLU, MHA) | Yes |
+| `model/` | AutoRalph-base — Llama-style transformer (RMSNorm, RoPE, SwiGLU, MHA) | Yes |
 | `recipe/` | Canonical training loop, optimizer config, LR schedule | Yes |
 | `data/` | Tokenizer, data manifest, dataset loader | Yes |
 | `configs/` | Training configs: `proxy` (125M), `default` (254M), `scale` (913M) | Yes |
@@ -66,7 +66,7 @@ The subnet and its token fund the production of these artifacts. They are not th
 | `proof/` | Proof-test runner (future: Docker container) | **Restricted** |
 | `miner/` | Submission bundle assembly, HuggingFace upload, hotkey signing | Outside protocol |
 | `validator/` | Four cheap ops + scoring + Stage 5 audit | Outside recipe |
-| `dashboard/` | Karpathian Live — Streamlit monitoring dashboard | — |
+| `dashboard/` | AutoRalph Live — Streamlit monitoring dashboard | — |
 | `scripts/` | `run_h100.sh` bootstrap, `noise_floor.py`, `smoke_test.py` | — |
 
 ## Quick start
@@ -74,8 +74,8 @@ The subnet and its token fund the production of these artifacts. They are not th
 ### CPU smoke test (no GPU needed)
 
 ```bash
-git clone https://github.com/KarpathianBase/karpathian.git
-cd karpathian
+git clone https://github.com/AutoRalphBase/autoralph.git
+cd autoralph
 python3 -m venv .venv && source .venv/bin/activate
 pip install torch numpy tiktoken cryptography
 
@@ -90,13 +90,13 @@ python scripts/smoke_test.py
 ### H100 full run (real data)
 
 ```bash
-git clone https://github.com/KarpathianBase/karpathian.git
-cd karpathian
+git clone https://github.com/AutoRalphBase/autoralph.git
+cd autoralph
 bash scripts/run_h100.sh
 ```
 
 This bootstraps everything on a fresh H100: FineWeb-Edu data prep (1B tokens),
-calibration benchmark, noise floor (10 seeds), and Karpathian-1 training
+calibration benchmark, noise floor (10 seeds), and AutoRalph-1 training
 (254M params, ~262M tokens). Wall-clock: ~6-7 hours (fp32).
 
 ### Live monitoring
@@ -106,7 +106,7 @@ calibration benchmark, noise floor (10 seeds), and Karpathian-1 training
 python -m recipe.train --config configs/h100_default.json --out-dir runs/my_run --wandb
 
 # Streamlit dashboard (network status, king history, submissions)
-pip install 'karpathian[dashboard]'
+pip install 'autoralph[dashboard]'
 streamlit run dashboard/app.py
 ```
 
@@ -127,11 +127,11 @@ the unverified tier is expected to be deprecated.
 |---|---|
 | H100 calibration (matmul) | 0.512 ms |
 | Noise floor (10 seeds, 125M model) | σ = 0.006 val_bpb, margin (2σ) = 0.013 |
-| Karpathian-1 fp32 (254M params, 262M tokens) | Final loss = 3.82, 16.9K tok/s, 259 min |
-| Karpathian-1 bf16 (same model, same data) | Final loss = 3.82, **63.4K tok/s, 69 min (3.8× faster)** |
+| AutoRalph-1 fp32 (254M params, 262M tokens) | Final loss = 3.82, 16.9K tok/s, 259 min |
+| AutoRalph-1 bf16 (same model, same data) | Final loss = 3.82, **63.4K tok/s, 69 min (3.8× faster)** |
 
-Full results: [Phase 0.5 Discussion](https://github.com/orgs/KarpathianBase/discussions/4) ·
-Release: [`v0.5.0`](https://github.com/KarpathianBase/karpathian/releases/tag/v0.5.0)
+Full results: [Phase 0.5 Discussion](https://github.com/orgs/AutoRalphBase/discussions/4) ·
+Release: [`v0.5.0`](https://github.com/AutoRalphBase/autoralph/releases/tag/v0.5.0)
 
 ## License
 

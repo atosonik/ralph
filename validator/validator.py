@@ -26,7 +26,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from eval import run_hidden_eval, HiddenEvalResult
-from model import KarpathianBase, KarpathianConfig
+from model import AutoRalphBase, AutoRalphConfig
 from proof.mock_attest import (
     MockAttestation,
     compute_container_measurement,
@@ -94,7 +94,7 @@ def _list_proof_sources(base: Path) -> list[Path]:
 
 
 def op1_diff_and_integrity(
-    karpathian_root: Path,
+    autoralph_root: Path,
     submission_payload: dict,
     proof_dir: Path,
 ) -> tuple[bool, str]:
@@ -111,7 +111,7 @@ def op1_diff_and_integrity(
         return False, "submission signature invalid"
 
     # Verify handshake nonce was actually committed on-chain.
-    chain_entry = lookup_handshake(karpathian_root, submission_payload["handshake_nonce"])
+    chain_entry = lookup_handshake(autoralph_root, submission_payload["handshake_nonce"])
     if chain_entry is None:
         return False, "handshake nonce not found on chain"
     if chain_entry["miner_hotkey"] != submission_payload["miner_hotkey"]:
@@ -137,7 +137,7 @@ def op1_diff_and_integrity(
 
 
 def op2_attestation_verify(
-    karpathian_root: Path,
+    autoralph_root: Path,
     submission_payload: dict,
     proof_dir: Path,
 ) -> tuple[bool, str, str]:
@@ -155,7 +155,7 @@ def op2_attestation_verify(
 
     att_text = att_path.read_text()
     att_data = json.loads(att_text)
-    expected_measurement = compute_container_measurement(_list_proof_sources(karpathian_root))
+    expected_measurement = compute_container_measurement(_list_proof_sources(autoralph_root))
 
     # Auto-detect attestation format: real (has attestation_type field) vs legacy mock
     if "attestation_type" in att_data:
@@ -210,13 +210,13 @@ def op3_log_plausibility(proof_dir: Path) -> tuple[bool, str]:
 
 
 def op4_hidden_eval(
-    karpathian_root: Path,
+    autoralph_root: Path,
     proof_dir: Path,
 ) -> tuple[bool, str, HiddenEvalResult | None]:
     ckpt_path = proof_dir / "training" / "checkpoint.pt"
     ckpt = torch.load(ckpt_path, weights_only=False, map_location="cpu")
     saved = ckpt["config"]
-    cfg = KarpathianConfig(
+    cfg = AutoRalphConfig(
         vocab_size=saved["vocab_size"],
         dim=saved["dim"],
         n_layers=saved["n_layers"],
@@ -225,16 +225,16 @@ def op4_hidden_eval(
         ffn_mult=saved["ffn_mult"],
         max_seq_len=saved["max_seq_len"],
     )
-    model = KarpathianBase(cfg)
+    model = AutoRalphBase(cfg)
     model.load_state_dict(ckpt["model"])
     if torch.cuda.is_available():
         model = model.cuda()
-    result = run_hidden_eval(model, karpathian_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
+    result = run_hidden_eval(model, autoralph_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
     return True, f"val_bpb={result.val_bpb:.4f} bench={result.benchmark_accuracy:.3f}", result
 
 
 def judge_submission(
-    karpathian_root: Path,
+    autoralph_root: Path,
     proof_dir: Path,
 ) -> ValidatorResult:
     """Run the four ops in order. Any failure shorts out and returns a rejection."""
@@ -253,13 +253,13 @@ def judge_submission(
         handshake_nonce=submission["handshake_nonce"],
     )
 
-    ok, detail = op1_diff_and_integrity(karpathian_root, submission, proof_dir)
+    ok, detail = op1_diff_and_integrity(autoralph_root, submission, proof_dir)
     result.operations["op1_diff_integrity"] = {"ok": ok, "detail": detail}
     if not ok:
         result.rejected = ValidatorReject("op1_diff_integrity", detail)
         return result
 
-    ok, detail, tier = op2_attestation_verify(karpathian_root, submission, proof_dir)
+    ok, detail, tier = op2_attestation_verify(autoralph_root, submission, proof_dir)
     result.operations["op2_attestation"] = {"ok": ok, "detail": detail, "tier": tier}
     if not ok:
         result.rejected = ValidatorReject("op2_attestation", detail)
@@ -271,7 +271,7 @@ def judge_submission(
         result.rejected = ValidatorReject("op3_log_plausibility", detail)
         return result
 
-    ok, detail, hidden_eval = op4_hidden_eval(karpathian_root, proof_dir)
+    ok, detail, hidden_eval = op4_hidden_eval(autoralph_root, proof_dir)
     result.operations["op4_hidden_eval"] = {"ok": ok, "detail": detail}
     result.hidden_eval = hidden_eval
 
@@ -290,11 +290,11 @@ def main() -> None:
     import argparse
 
     p = argparse.ArgumentParser()
-    p.add_argument("--karpathian-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--autoralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--proof-dir", type=Path, required=True)
     args = p.parse_args()
 
-    res = judge_submission(args.karpathian_root, args.proof_dir)
+    res = judge_submission(args.autoralph_root, args.proof_dir)
     print(json.dumps(res.to_dict(), indent=2, default=str))
 
 

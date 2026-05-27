@@ -1,7 +1,7 @@
 """
 Local JSON-file chain backend — Phase 0 / testing.
 
-All state lives in a `chain/` directory under the karpathian root:
+All state lives in a `chain/` directory under the autoralph root:
   chain/handshakes.jsonl   — one handshake per line
   chain/king.json          — current king
   chain/events.jsonl       — all protocol events

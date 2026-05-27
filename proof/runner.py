@@ -147,7 +147,7 @@ class ProofTestBundle:
 
 
 def run_proof_test(
-    karpathian_root: Path,
+    autoralph_root: Path,
     submission_dir: Path,
     out_dir: Path,
     total_steps_override: int | None = None,
@@ -155,7 +155,7 @@ def run_proof_test(
 ) -> ProofTestBundle:
     submission_dir = Path(submission_dir)
     out_dir = Path(out_dir)
-    karpathian_root = Path(karpathian_root)
+    autoralph_root = Path(autoralph_root)
 
     proof_request = json.loads((submission_dir / "proof_request.json").read_text())
     handshake_nonce = proof_request["handshake_nonce"]
@@ -167,10 +167,10 @@ def run_proof_test(
     # 1. Compute container measurement BEFORE patching (the canonical recipe's
     #    measurement). The container_measurement in Phase 0.5+ is the Docker
     #    image digest, which is independent of any miner patch.
-    container_measurement = compute_container_measurement(_list_proof_sources(karpathian_root))
+    container_measurement = compute_container_measurement(_list_proof_sources(autoralph_root))
 
     # 2. Scan the patch for restricted-file violations.
-    restricted_yaml = karpathian_root / "restricted_files.yaml"
+    restricted_yaml = autoralph_root / "restricted_files.yaml"
     restricted_patterns = _load_restricted_paths(restricted_yaml)
     patch_text = patch_path.read_text() if patch_path.exists() else ""
     violations = scan_diff_for_restricted(patch_text, restricted_patterns)
@@ -184,12 +184,12 @@ def run_proof_test(
         shutil.rmtree(workdir)
     workdir.mkdir(parents=True)
     for sub in ("model", "recipe", "data", "configs", "eval", "calibration"):
-        src = karpathian_root / sub
+        src = autoralph_root / sub
         if src.exists():
             shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
     # Copy required top-level files.
     for f in ("restricted_files.yaml",):
-        src = karpathian_root / f
+        src = autoralph_root / f
         if src.exists():
             shutil.copy2(src, workdir / f)
     if patch_text:
@@ -208,11 +208,11 @@ def run_proof_test(
         "--seed", str(declared_seed),
     ]
     if config_path:
-        train_cmd += ["--config", str((karpathian_root / config_path).resolve())]
+        train_cmd += ["--config", str((autoralph_root / config_path).resolve())]
     if total_steps_override is not None:
         train_cmd += ["--total-steps", str(total_steps_override)]
     # Use the workdir's manifest so the audit trail is bound to the patched recipe.
-    train_cmd += ["--manifest", str((karpathian_root / "data" / "data_manifest.json").resolve())]
+    train_cmd += ["--manifest", str((autoralph_root / "data" / "data_manifest.json").resolve())]
     print(f"[proof] running training: {' '.join(train_cmd)}")
     train_result = subprocess.run(
         train_cmd,
@@ -325,7 +325,7 @@ def _build_epoch_records(
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--karpathian-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--autoralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--submission", type=Path, required=True, help="dir with patch.diff + proof_request.json")
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--total-steps", type=int, default=None)
@@ -334,7 +334,7 @@ def main() -> None:
     args = p.parse_args()
 
     bundle = run_proof_test(
-        karpathian_root=args.karpathian_root,
+        autoralph_root=args.autoralph_root,
         submission_dir=args.submission,
         out_dir=args.out_dir,
         total_steps_override=args.total_steps,

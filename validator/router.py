@@ -26,31 +26,31 @@ from validator.scoring import ScoreReport, score_bundle
 from validator.validator import judge_submission, ValidatorResult
 
 
-def _chain_dir(karpathian_root: Path) -> Path:
-    d = karpathian_root / "chain"
+def _chain_dir(autoralph_root: Path) -> Path:
+    d = autoralph_root / "chain"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _load_king(karpathian_root: Path) -> dict | None:
-    path = _chain_dir(karpathian_root) / "king.json"
+def _load_king(autoralph_root: Path) -> dict | None:
+    path = _chain_dir(autoralph_root) / "king.json"
     if not path.exists():
         return None
     return json.loads(path.read_text())
 
 
-def _write_king(karpathian_root: Path, king: dict) -> None:
-    (_chain_dir(karpathian_root) / "king.json").write_text(json.dumps(king, indent=2, sort_keys=True))
+def _write_king(autoralph_root: Path, king: dict) -> None:
+    (_chain_dir(autoralph_root) / "king.json").write_text(json.dumps(king, indent=2, sort_keys=True))
 
 
-def _append_event(karpathian_root: Path, event: dict) -> None:
-    path = _chain_dir(karpathian_root) / "events.jsonl"
+def _append_event(autoralph_root: Path, event: dict) -> None:
+    path = _chain_dir(autoralph_root) / "events.jsonl"
     with path.open("a") as f:
         f.write(json.dumps(event) + "\n")
 
 
 def process_submission(
-    karpathian_root: Path,
+    autoralph_root: Path,
     proof_dir: Path,
     noise_floor_margin: float = 0.02,
 ) -> dict:
@@ -61,7 +61,7 @@ def process_submission(
       3. emit merge or reject event
     """
     proof_dir = Path(proof_dir)
-    result = judge_submission(karpathian_root, proof_dir)
+    result = judge_submission(autoralph_root, proof_dir)
 
     if result.rejected is not None:
         event = {
@@ -73,10 +73,10 @@ def process_submission(
             "detail": result.rejected.detail,
             "operations": result.operations,
         }
-        _append_event(karpathian_root, event)
+        _append_event(autoralph_root, event)
         return {"status": "rejected", "result": result.to_dict(), "event": event}
 
-    king = _load_king(karpathian_root)
+    king = _load_king(autoralph_root)
     king_val_bpb = king["val_bpb"] if king else None
     king_benchmark = king["benchmark_accuracy"] if king else None
 
@@ -111,7 +111,7 @@ def process_submission(
         "accepted_as_king": accepted or is_first,
         "operations": result.operations,
     }
-    _append_event(karpathian_root, event)
+    _append_event(autoralph_root, event)
 
     if accepted or is_first:
         new_king = {
@@ -125,8 +125,8 @@ def process_submission(
         }
         if king:
             new_king["previous_king"] = king
-        _write_king(karpathian_root, new_king)
-        _append_event(karpathian_root, {
+        _write_king(autoralph_root, new_king)
+        _append_event(autoralph_root, {
             "type": "king_changed" if king else "initial_king",
             "timestamp": time.time(),
             "new_king": new_king,
@@ -142,12 +142,12 @@ def process_submission(
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--karpathian-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--autoralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--proof-dir", type=Path, required=True)
     p.add_argument("--noise-floor", type=float, default=0.02)
     args = p.parse_args()
 
-    out = process_submission(args.karpathian_root, args.proof_dir, args.noise_floor)
+    out = process_submission(args.autoralph_root, args.proof_dir, args.noise_floor)
     print(json.dumps(out, indent=2, default=str))
 
 
