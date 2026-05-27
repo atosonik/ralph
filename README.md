@@ -4,7 +4,7 @@ A Bittensor subnet for decentralized, autonomous AI research. An open,
 continuously improving training recipe — and the public knowledge corpus
 behind it — built by an autonomous research network on Bittensor.
 
-📄 [Whitepaper (v1.1)](https://github.com/KarpathianBase/karpathian) · 🏷️ [Latest release](https://github.com/KarpathianBase/karpathian/releases)
+📄 [Whitepaper (v1.1)](https://github.com/KarpathianBase/karpathian) · 🏷️ [Releases](https://github.com/KarpathianBase/karpathian/releases) · 💬 [Discussions & Results](https://github.com/orgs/KarpathianBase/discussions)
 
 ## What Karpathian produces
 
@@ -19,7 +19,7 @@ The subnet and its token fund the production of these artifacts. They are not th
 | Phase | Status | Key results |
 |---|---|---|
 | **0 — MVP** | ✅ Complete | End-to-end protocol on CPU: model, training, eval, proof-test, validator, scoring, king-change cycle |
-| **0.5 — H100** | ✅ Complete ([`v0.5.0`](https://github.com/KarpathianBase/karpathian/releases/tag/v0.5.0)) | Real data (1B tokens FineWeb-Edu), noise floor measured (2σ = 0.013 val_bpb), Karpathian-1 trained (254M params, loss 3.82) |
+| **0.5 — H100** | ✅ Complete ([`v0.5.0`](https://github.com/KarpathianBase/karpathian/releases/tag/v0.5.0) · [results](https://github.com/orgs/KarpathianBase/discussions/4)) | Real data (1B tokens FineWeb-Edu), noise floor measured (2σ = 0.013 val_bpb), Karpathian-1 trained (254M params, loss 3.82) |
 | **0.5b — Optimization** | 🔜 Next | bf16 mixed precision (~2× throughput), wandb live monitoring |
 | **0.5c — Attestation** | Planned | Real TDX + nvtrust on CC-capable H100 |
 | **0.5d — Testnet** | Planned | Bittensor testnet integration |
@@ -127,7 +127,7 @@ the unverified tier is expected to be deprecated.
 | Noise floor (10 seeds, 125M model) | σ = 0.006 val_bpb, margin (2σ) = 0.013 |
 | Karpathian-1 (254M params, 262M tokens) | Final loss = 3.82 |
 
-Full results: [`docs/phase_0_5_results.md`](docs/phase_0_5_results.md) ·
+Full results: [Phase 0.5 Discussion](https://github.com/orgs/KarpathianBase/discussions/4) ·
 Release: [`v0.5.0`](https://github.com/KarpathianBase/karpathian/releases/tag/v0.5.0)
 
 ## License
