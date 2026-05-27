@@ -226,7 +226,16 @@ def train(cfg: TrainConfig, out_dir: Path, use_wandb: bool = False) -> dict:
                 f"|g|={grad_norm:.2f} tok/s={tok_per_s:,.0f}"
             )
     log_f.close()
+    wb_url = None
     if wb_run:
+        wb_url = wb_run.url
+        try:
+            history = wb_run.history(pandas=False)
+            (out_dir / "wandb_metrics.json").write_text(json.dumps(history, indent=2))
+            (out_dir / "wandb_run_url.txt").write_text(wb_url + "\n")
+            print(f"[train] wandb metrics exported ({len(history)} steps)")
+        except Exception as e:
+            print(f"[train] wandb export failed ({e}), continuing")
         wb_run.finish()
 
     ckpt_path = out_dir / "checkpoint.pt"
@@ -241,6 +250,8 @@ def train(cfg: TrainConfig, out_dir: Path, use_wandb: bool = False) -> dict:
         "n_params_no_embed": n_params_no_embed,
         "manifest_hash": ds.manifest.manifest_hash(),
         "device": str(device),
+        "precision": "bf16" if use_amp else "fp32",
+        "wandb_url": wb_url,
         "config": asdict(cfg),
     }
     (out_dir / "final_state.json").write_text(json.dumps(summary, indent=2))

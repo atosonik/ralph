@@ -59,7 +59,8 @@ def upload_bundle(
     ]
     training_dir = proof_dir / "training"
     if training_dir.exists():
-        for name in ["checkpoint.pt", "training_log.jsonl", "final_state.json"]:
+        for name in ["checkpoint.pt", "training_log.jsonl", "final_state.json",
+                      "wandb_metrics.json", "wandb_run_url.txt"]:
             path = training_dir / name
             if path.exists():
                 files_to_upload.append((name, path))
