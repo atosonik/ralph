@@ -2,6 +2,13 @@
 RESTRICTED — Validator client. Miners do not see this code at runtime.
 """
 
+# Inject the sibling recipe repo onto sys.path before any submodule pulls in
+# `from model import ...` / `from recipe.train import ...`.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+import karpa_bootstrap  # noqa: F401
+
 from .validator import (
     ValidatorResult,
     ValidatorReject,

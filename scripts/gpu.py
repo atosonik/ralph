@@ -34,10 +34,18 @@ import urllib.error
 
 API_BASE = "https://api.shadeform.ai/v1"
 KEY_FILE = Path("/root/.shadeform_api_key")
-INSTANCE_FILE = Path("/root/.shadeform_instance.json")
 SSH_KEY = Path("/root/.ssh/id_bitzic")
 SSH_KEY_ID = os.environ.get("SHADEFORM_SSH_KEY_ID", "")
 BACKUP_DIR = Path(__file__).resolve().parent.parent.parent / "backup_h100"
+
+
+def _instance_file(name: str = "default") -> Path:
+    """One state file per logical instance (e.g. karpa1, karpa2)."""
+    return Path(f"/root/.shadeform_instance_{name}.json")
+
+
+# Back-compat: legacy single-instance state file.
+INSTANCE_FILE = _instance_file("default")
 
 
 def _api_key() -> str:
@@ -61,14 +69,14 @@ def _api(method: str, path: str, body: dict | None = None) -> dict:
         sys.exit(1)
 
 
-def _save_instance(data: dict) -> None:
-    INSTANCE_FILE.write_text(json.dumps(data, indent=2))
+def _save_instance(data: dict, name: str = "default") -> None:
+    _instance_file(name).write_text(json.dumps(data, indent=2))
 
 
-def _load_instance() -> Optional[dict]:
-    if not INSTANCE_FILE.exists():
+def _load_instance(name: str = "default") -> Optional[dict]:
+    if not _instance_file(name).exists():
         return None
-    return json.loads(INSTANCE_FILE.read_text())
+    return json.loads(_instance_file(name).read_text())
 
 
 # ---- Commands ----
@@ -93,10 +101,11 @@ def cmd_list_types(args):
 
 def cmd_rent(args):
     """Rent the cheapest available H100."""
-    existing = _load_instance()
+    name = getattr(args, "name", "default")
+    existing = _load_instance(name)
     if existing and existing.get("status") not in ("deleted", "error", None):
-        print(f"Instance already exists: {existing.get('id', '?')} ({existing.get('status')})")
-        print(f"Delete it first with: python scripts/gpu.py delete")
+        print(f"Instance '{name}' already exists: {existing.get('id', '?')} ({existing.get('status')})")
+        print(f"Delete it first with: python scripts/gpu.py delete --name {name}")
         return
 
     # Default: Hyperstack H100. Override with --cloud / --region.
@@ -135,7 +144,7 @@ def cmd_rent(args):
         "region": region,
         "shade_instance_type": shade_type,
         "shade_cloud": True,
-        "name": f"karpa-{int(time.time()) % 100000}",
+        "name": f"karpa-{name}-{int(time.time()) % 100000}",
     }
     if SSH_KEY_ID:
         body["ssh_key_id"] = SSH_KEY_ID
@@ -147,6 +156,7 @@ def cmd_rent(args):
 
     instance_data = {
         "id": instance_id,
+        "name": name,
         "cloud": cloud,
         "region": region,
         "type": shade_type,
@@ -154,7 +164,7 @@ def cmd_rent(args):
         "created_at": time.time(),
         "status": "pending",
     }
-    _save_instance(instance_data)
+    _save_instance(instance_data, name)
 
     print("Waiting for instance to be ready...")
     for i in range(60):
@@ -167,7 +177,7 @@ def cmd_rent(args):
         instance_data["ip"] = ip
         instance_data["ssh_port"] = info.get("ssh_port", 22)
         instance_data["ssh_user"] = info.get("ssh_user", "root")
-        _save_instance(instance_data)
+        _save_instance(instance_data, name)
         if status == "active" and ip:
             print(f"\nInstance ready!")
             print(f"  IP: {ip}")
@@ -179,16 +189,17 @@ def cmd_rent(args):
 
 def cmd_status(args):
     """Show current instance status."""
-    inst = _load_instance()
+    name = getattr(args, "name", "default")
+    inst = _load_instance(name)
     if not inst:
-        print("No active instance. Rent one with: python scripts/gpu.py rent")
+        print(f"No active instance '{name}'. Rent one with: python scripts/gpu.py rent --name {name}")
         return
     if inst.get("id"):
         try:
             info = _api("GET", f"/instances/{inst['id']}/info")
             inst["status"] = info.get("status", inst.get("status"))
             inst["ip"] = info.get("ip", inst.get("ip"))
-            _save_instance(inst)
+            _save_instance(inst, name)
         except Exception:
             pass
     hours = (time.time() - inst.get("created_at", time.time())) / 3600
@@ -204,9 +215,10 @@ def cmd_status(args):
 
 def cmd_ssh(args):
     """SSH into the instance or run a command."""
-    inst = _load_instance()
+    name = getattr(args, "name", "default")
+    inst = _load_instance(name)
     if not inst or not inst.get("ip"):
-        print("No active instance with IP. Rent one first.")
+        print(f"No active instance '{name}' with IP. Rent one first.")
         return
     cmd = ["ssh", "-o", "StrictHostKeyChecking=no",
            "-i", str(SSH_KEY),
@@ -219,9 +231,10 @@ def cmd_ssh(args):
 
 def cmd_backup(args):
     """Backup results from the instance to local backup dir."""
-    inst = _load_instance()
+    name = getattr(args, "name", "default")
+    inst = _load_instance(name)
     if not inst or not inst.get("ip"):
-        print("No active instance.")
+        print(f"No active instance '{name}'.")
         return
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     ip = inst["ip"]
@@ -253,13 +266,14 @@ def cmd_backup(args):
 
 def cmd_delete(args):
     """Delete the instance (stops billing)."""
-    inst = _load_instance()
+    name = getattr(args, "name", "default")
+    inst = _load_instance(name)
     if not inst or not inst.get("id"):
-        print("No instance to delete.")
+        print(f"No instance '{name}' to delete.")
         return
     instance_id = inst["id"]
     if not args.yes:
-        confirm = input(f"Delete instance {instance_id}? This stops billing. [y/N] ")
+        confirm = input(f"Delete instance '{name}' ({instance_id})? This stops billing. [y/N] ")
         if confirm.lower() != "y":
             print("Cancelled.")
             return
@@ -267,7 +281,7 @@ def cmd_delete(args):
     _api("POST", f"/instances/{instance_id}/delete")
     inst["status"] = "deleted"
     inst["deleted_at"] = time.time()
-    _save_instance(inst)
+    _save_instance(inst, name)
     hours = (inst["deleted_at"] - inst.get("created_at", inst["deleted_at"])) / 3600
     cost = hours * inst.get("price_per_hour", 0)
     print(f"Deleted. Total uptime: {hours:.1f}h, est. cost: ${cost:.2f}")
@@ -281,14 +295,19 @@ def main():
     rent_p = sub.add_parser("rent", help="Rent H100 (default: Hyperstack)")
     rent_p.add_argument("--cloud", default=None, help="Cloud provider (default: hyperstack)")
     rent_p.add_argument("--region", default=None, help="Region (default: auto-pick cheapest)")
-    sub.add_parser("status", help="Show instance status")
+    rent_p.add_argument("--name", default="default", help="Logical instance name (state file suffix)")
+    status_p = sub.add_parser("status", help="Show instance status")
+    status_p.add_argument("--name", default="default")
 
     ssh_p = sub.add_parser("ssh", help="SSH into instance")
+    ssh_p.add_argument("--name", default="default")
     ssh_p.add_argument("command", nargs="*", help="Command to run (or omit for interactive)")
 
-    sub.add_parser("backup", help="Backup results to local dir")
+    backup_p = sub.add_parser("backup", help="Backup results to local dir")
+    backup_p.add_argument("--name", default="default")
 
     del_p = sub.add_parser("delete", help="Delete instance")
+    del_p.add_argument("--name", default="default")
     del_p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
 
     args = p.parse_args()
