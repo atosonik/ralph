@@ -101,6 +101,25 @@ def archive_bundle(bundle_dir: Path, queue_dir: Path, dest: str) -> None:
     shutil.move(str(bundle_dir), str(target))
 
 
+def _verify_pr_if_required(result, bundle_dir: Path) -> tuple[bool, str]:
+    """If $KARPA_BOT_GH_TOKEN is set and the submission carries a pr_url,
+    verify the PR's diff is byte-equal to the bundle's patch.diff.
+    Returns (ok, detail). If verification isn't configured, returns (True, "").
+    """
+    token = os.environ.get("KARPA_BOT_GH_TOKEN", "")
+    if not token or not result.pr_url:
+        return True, ""
+    patch_path = bundle_dir / "patch.diff"
+    if not patch_path.exists():
+        return True, "no patch.diff in bundle (baseline?) — skipping PR match"
+    patch_text = patch_path.read_text()
+    if not patch_text.strip():
+        return True, "empty patch (baseline) — skipping PR match"
+    from validator.github_bot import verify_pr_matches_bundle
+    v = verify_pr_matches_bundle(result.pr_url, patch_text, token)
+    return v.ok, v.detail
+
+
 def score_and_decide(
     chain,
     bundle_dir: Path,
@@ -114,8 +133,20 @@ def score_and_decide(
             "status": "rejected",
             "miner_hotkey": result.miner_hotkey,
             "miner_github": result.miner_github,
+            "pr_url": result.pr_url,
             "reason": result.rejected.reason,
             "detail": result.rejected.detail,
+        }
+
+    pr_ok, pr_detail = _verify_pr_if_required(result, bundle_dir)
+    if not pr_ok:
+        return {
+            "status": "rejected",
+            "miner_hotkey": result.miner_hotkey,
+            "miner_github": result.miner_github,
+            "pr_url": result.pr_url,
+            "reason": "pr_mismatch",
+            "detail": pr_detail,
         }
 
     king = chain.get_king()
@@ -141,6 +172,7 @@ def score_and_decide(
         "status": "accepted" if accepted else "below_threshold",
         "miner_hotkey": result.miner_hotkey,
         "miner_github": result.miner_github,
+        "pr_url": result.pr_url,
         "bundle_hash": result.bundle_hash,
         "val_bpb": result.hidden_eval.val_bpb,
         "benchmark_accuracy": result.hidden_eval.benchmark_accuracy,
@@ -248,6 +280,46 @@ def run_epoch(
                 new_king.previous_king = dataclasses.asdict(king)
             chain.set_king(new_king)
             epoch_results["accepted"] += 1
+
+            # Auto-merge the winning PR + tag + release on karpaai/recipe.
+            # Requires KARPA_BOT_GH_TOKEN. Failures here don't unwind the king
+            # — the on-chain crown already happened.
+            bot_token = os.environ.get("KARPA_BOT_GH_TOKEN", "")
+            pr_url = result.get("pr_url", "")
+            if bot_token and pr_url:
+                try:
+                    from validator.github_bot import merge_and_release
+                    rel = merge_and_release(
+                        pr_url=pr_url,
+                        metrics={
+                            "val_bpb": result["val_bpb"],
+                            "quality_gain": result["quality_gain"],
+                            "compute_cost_h100h": result["score_report"].compute_cost,
+                            "benchmark_accuracy": result["benchmark_accuracy"],
+                            "miner_hotkey": miner_hotkey,
+                            "miner_github": result.get("miner_github", ""),
+                            "bundle_hash": result["bundle_hash"],
+                            "hf_bundle_url": (
+                                f"https://huggingface.co/datasets/{os.environ.get('KARPA_HF_REPO', 'karpaai/proof-bundles')}"
+                                f"/tree/main/submissions/{result['bundle_hash'][:16]}"
+                            ),
+                        },
+                        token=bot_token,
+                    )
+                    log_info(f"recipe released: {rel.tag} ({rel.release_url})")
+                    chain.append_event({
+                        "type": "recipe_released",
+                        "timestamp": time.time(),
+                        "tag": rel.tag,
+                        "release_url": rel.release_url,
+                        "merge_sha": rel.merge_sha,
+                        "miner_hotkey": miner_hotkey,
+                        "miner_github": result.get("miner_github", ""),
+                    })
+                except Exception as e:
+                    log_warn(f"recipe release failed: {e}")
+            elif pr_url and not bot_token:
+                log_warn(f"king changed with PR {pr_url} but KARPA_BOT_GH_TOKEN unset — manual merge needed")
         else:
             log_info(f"below threshold: {miner_hotkey[:20]}... gain={result['quality_gain']:+.4f}")
 

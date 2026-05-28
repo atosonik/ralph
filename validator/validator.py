@@ -51,6 +51,7 @@ class ValidatorResult:
     bundle_hash: str
     handshake_nonce: str
     miner_github: str = ""  # self-declared attribution; informational only
+    pr_url: str = ""  # PR against karpaai/recipe (verified later in service.py)
     hidden_eval: HiddenEvalResult | None = None
     training_summary: dict | None = None
     calibration: dict | None = None
@@ -61,6 +62,7 @@ class ValidatorResult:
         return {
             "miner_hotkey": self.miner_hotkey,
             "miner_github": self.miner_github,
+            "pr_url": self.pr_url,
             "bundle_hash": self.bundle_hash,
             "handshake_nonce": self.handshake_nonce,
             "hidden_eval": asdict(self.hidden_eval) if self.hidden_eval else None,
@@ -254,6 +256,7 @@ def judge_submission(
     result = ValidatorResult(
         miner_hotkey=submission["miner_hotkey"],
         miner_github=submission.get("miner_github", ""),
+        pr_url=submission.get("pr_url", ""),
         bundle_hash=submission["bundle_hash"],
         handshake_nonce=submission["handshake_nonce"],
     )

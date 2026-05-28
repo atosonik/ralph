@@ -126,9 +126,49 @@ def run_miner(
     print(f"      bundle_hash: {bundle.bundle_hash[:24]}...")
     print(f"      elapsed:     {elapsed:.1f}s")
 
-    # ---- 4. Sign + assemble submission -------------------------------------
-    print(f"\n[3/5] signing submission...")
+    # ---- 4. Sign submission ------------------------------------------------
+    print(f"\n[3/6] signing submission...")
     sig = sign_submission(KARPA_ROOT, miner_hotkey, bundle.bundle_hash, nonce)
+    print(f"      signed by {sig['public_key_hex'][:24]}...")
+
+    # ---- 5. Upload bundle to HF Hub (we need the URL for the PR body) ------
+    if skip_upload:
+        print(f"\n[4/6] skipping HF upload (--skip-upload)")
+        url = None
+    else:
+        print(f"\n[4/6] uploading bundle to HF Hub {hf_repo}...")
+        url = upload_bundle(proof_dir, repo_id=hf_repo, token=hf_token)
+
+    # ---- 6. Open PR against karpaai/recipe ---------------------------------
+    pr_url = ""
+    fork_url = os.environ.get("KARPA_RECIPE_FORK", "")
+    gh_token = os.environ.get("KARPA_MINER_GH_TOKEN", "")
+    upstream = os.environ.get("KARPA_RECIPE_UPSTREAM", "karpaai/recipe")
+    if not patch_text.strip():
+        print(f"\n[5/6] skipping PR (baseline submission, empty patch)")
+    elif skip_upload:
+        print(f"\n[5/6] skipping PR (--skip-upload also implies no PR)")
+    elif not fork_url or not gh_token:
+        print(f"\n[5/6] WARNING: KARPA_RECIPE_FORK or KARPA_MINER_GH_TOKEN missing — not opening PR")
+    else:
+        print(f"\n[5/6] opening PR against {upstream}...")
+        from miner.github_pr import open_recipe_pr
+        try:
+            pr_url = open_recipe_pr(
+                patch_text=patch_text,
+                bundle_hash=bundle.bundle_hash,
+                miner_hotkey=miner_hotkey,
+                miner_github=miner_gh,
+                hf_bundle_url=url,
+                signature_hex=sig["signature_hex"],
+                fork_url=fork_url,
+                token=gh_token,
+                upstream=upstream,
+            )
+            print(f"      PR: {pr_url}")
+        except Exception as e:
+            print(f"      WARNING: PR open failed ({e}). Submission still uploaded to HF.")
+
     submission = {
         "miner_hotkey": miner_hotkey,
         "miner_github": miner_gh,
@@ -140,24 +180,32 @@ def run_miner(
         "public_key_hex": sig["public_key_hex"],
         "submitted_at": time.time(),
         "label": label,
+        "pr_url": pr_url,
+        "hf_bundle_url": url or "",
     }
     (proof_dir / "submission.json").write_text(json.dumps(submission, indent=2, sort_keys=True))
-    print(f"      signed by {sig['public_key_hex'][:24]}...")
 
-    # ---- 5. Upload to HF Hub -----------------------------------------------
-    if skip_upload:
-        print(f"\n[4/5] skipping HF upload (--skip-upload)")
-        url = None
-    else:
-        print(f"\n[4/5] uploading bundle to HF Hub {hf_repo}...")
-        url = upload_bundle(proof_dir, repo_id=hf_repo, token=hf_token)
+    # Re-upload submission.json so the bundle on HF includes pr_url
+    if not skip_upload:
+        from huggingface_hub import HfApi
+        api = HfApi(token=hf_token)
+        prefix = f"submissions/{bundle.bundle_hash[:16]}"
+        api.upload_file(
+            path_or_fileobj=str(proof_dir / "submission.json"),
+            path_in_repo=f"{prefix}/submission.json",
+            repo_id=hf_repo,
+            repo_type="dataset",
+            commit_message=f"Update submission.json with PR URL for {bundle.bundle_hash[:12]}",
+        )
 
-    # ---- 6. Done -----------------------------------------------------------
-    print(f"\n[5/5] DONE")
+    # ---- 7. Done -----------------------------------------------------------
+    print(f"\n[6/6] DONE")
     print(f"  bundle_hash: {bundle.bundle_hash}")
     print(f"  proof_dir:   {proof_dir}")
     if url:
         print(f"  hf url:      {url}")
+    if pr_url:
+        print(f"  pr:          {pr_url}")
     print(f"\nValidators will now find this on HF Hub and score it.")
     print(f"Track status: tail -f {KARPA_ROOT}/chain*/events.jsonl  (on validator host)")
 
@@ -166,6 +214,7 @@ def run_miner(
         "bundle_hash": bundle.bundle_hash,
         "patch_hash": patch_hash,
         "nonce": nonce,
+        "pr_url": pr_url,
         "proof_dir": str(proof_dir),
         "hf_url": url,
         "elapsed_s": elapsed,
