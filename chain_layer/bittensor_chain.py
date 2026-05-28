@@ -179,7 +179,7 @@ class BittensorChain(ChainInterface):
         cr_enabled = self.subtensor.commit_reveal_enabled(netuid=self.netuid)
 
         try:
-            # Check rate limit before attempting
+            # Skip if rate limited — try again next epoch (don't block service).
             rl = self.subtensor.weights_rate_limit(netuid=self.netuid)
             my_uid = self.get_uid(self.wallet.hotkey.ss58_address)
             if my_uid is not None:
@@ -187,10 +187,9 @@ class BittensorChain(ChainInterface):
                 blocks_since = self.subtensor.get_current_block() - last_update
                 if blocks_since <= rl:
                     wait_blocks = rl - blocks_since + 1
-                    wait_secs = wait_blocks * 12
-                    print(f"[chain] rate limited ({blocks_since}/{rl} blocks). waiting ~{wait_secs}s...")
-                    import time as _time
-                    _time.sleep(wait_secs)
+                    print(f"[chain] rate limited ({blocks_since}/{rl} blocks). "
+                          f"skipping set_weights — will retry next epoch (~{wait_blocks * 12}s)")
+                    return False
 
             if cr_enabled:
                 result = self.subtensor.commit_weights(
