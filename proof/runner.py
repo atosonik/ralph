@@ -42,20 +42,28 @@ from proof.mock_attest import compute_container_measurement
 from proof.real_attest import generate_attestation, detect_capabilities
 
 
-def _list_proof_sources(base: Path) -> list[Path]:
-    """Source files contributing to the container measurement."""
-    dirs = ["model", "recipe", "data", "eval", "calibration", "proof"]
-    files = ["restricted_files.yaml", "README.md"]
+def _list_proof_sources(karpa_root: Path) -> list[Path]:
+    """Source files contributing to the container measurement.
+
+    Covers both repos: protocol (eval, calibration, proof) lives in
+    karpa_root; recipe (model, recipe, data) lives in RECIPE_DIR.
+    """
+    from karpa_bootstrap import RECIPE_DIR
+    sources: list[tuple[Path, list[str]]] = [
+        (RECIPE_DIR, ["model", "recipe", "data", "configs"]),
+        (karpa_root, ["eval", "calibration", "proof"]),
+    ]
     out: list[Path] = []
-    for d in dirs:
-        path = base / d
-        if not path.exists():
-            continue
-        for p in sorted(path.rglob("*")):
-            if p.is_file() and "__pycache__" not in p.parts and p.suffix in {".py", ".yaml", ".json", ".md"}:
-                out.append(p)
-    for f in files:
-        path = base / f
+    for base, dirs in sources:
+        for d in dirs:
+            path = base / d
+            if not path.exists():
+                continue
+            for p in sorted(path.rglob("*")):
+                if p.is_file() and "__pycache__" not in p.parts and p.suffix in {".py", ".yaml", ".json", ".md"}:
+                    out.append(p)
+    for f in ["restricted_files.yaml", "README.md"]:
+        path = karpa_root / f
         if path.exists():
             out.append(path)
     return out
@@ -178,12 +186,19 @@ def run_proof_test(
         raise RuntimeError(f"patch touches restricted paths: {violations}")
 
     # 3. Create a working copy of the canonical recipe and apply the patch.
+    #    The recipe (model/, recipe/, data/, configs/) lives in the sibling
+    #    karpaai/recipe repo; eval/, calibration/ stay in the protocol repo.
     out_dir.mkdir(parents=True, exist_ok=True)
     workdir = out_dir / "workdir"
     if workdir.exists():
         shutil.rmtree(workdir)
     workdir.mkdir(parents=True)
-    for sub in ("model", "recipe", "data", "configs", "eval", "calibration"):
+    from karpa_bootstrap import RECIPE_DIR
+    for sub in ("model", "recipe", "data", "configs"):
+        src = RECIPE_DIR / sub
+        if src.exists():
+            shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
+    for sub in ("eval", "calibration"):
         src = karpa_root / sub
         if src.exists():
             shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
@@ -208,11 +223,15 @@ def run_proof_test(
         "--seed", str(declared_seed),
     ]
     if config_path:
-        train_cmd += ["--config", str((karpa_root / config_path).resolve())]
+        # config_path is recipe-relative (e.g. "configs/h100_proxy.json"); use the
+        # workdir copy so any patch to the config is honoured.
+        train_cmd += ["--config", str((workdir / config_path).resolve())]
     if total_steps_override is not None:
         train_cmd += ["--total-steps", str(total_steps_override)]
-    # Use the workdir's manifest so the audit trail is bound to the patched recipe.
-    train_cmd += ["--manifest", str((karpa_root / "data" / "data_manifest.json").resolve())]
+    # Manifest lives in the recipe repo (data.prepare writes it there). The
+    # canonical training reads from that manifest, not the workdir copy, so the
+    # shard byte-content is bound to the recipe checkout's manifest hash.
+    train_cmd += ["--manifest", str((RECIPE_DIR / "data" / "data_manifest.json").resolve())]
     print(f"[proof] running training: {' '.join(train_cmd)}")
     train_result = subprocess.run(
         train_cmd,

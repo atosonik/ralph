@@ -31,6 +31,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR onto sys.path
+
 from chain_layer.config import get_chain
 from proof.runner import run_proof_test
 from miner.submit import sign_submission
@@ -60,6 +62,7 @@ def run_miner(
 
     wallet_name = os.environ.get("BT_WALLET", "default")
     hotkey_name = os.environ.get("BT_HOTKEY", "default")
+    miner_gh = os.environ.get("KARPA_MINER_GH", "")
     miner_hotkey = _get_hotkey_ss58(wallet_name, hotkey_name)
 
     print(f"\n{'='*60}")
@@ -67,6 +70,8 @@ def run_miner(
     print(f"{'='*60}")
     print(f"  wallet: {wallet_name}/{hotkey_name}")
     print(f"  hotkey: {miner_hotkey}")
+    if miner_gh:
+        print(f"  gh:     {miner_gh}")
     print(f"  config: {config_path}")
     print(f"  tier:   {tier}")
     print(f"  hf:     {hf_repo}")
@@ -126,6 +131,7 @@ def run_miner(
     sig = sign_submission(KARPA_ROOT, miner_hotkey, bundle.bundle_hash, nonce)
     submission = {
         "miner_hotkey": miner_hotkey,
+        "miner_github": miner_gh,
         "handshake_nonce": nonce,
         "patch_path": str(target_patch),
         "proof_dir": str(proof_dir),

@@ -41,6 +41,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR onto sys.path
+
 from chain_layer.config import get_chain
 from validator.validator import judge_submission
 from validator.scoring import score_bundle
@@ -111,6 +113,7 @@ def score_and_decide(
         return {
             "status": "rejected",
             "miner_hotkey": result.miner_hotkey,
+            "miner_github": result.miner_github,
             "reason": result.rejected.reason,
             "detail": result.rejected.detail,
         }
@@ -137,6 +140,7 @@ def score_and_decide(
     return {
         "status": "accepted" if accepted else "below_threshold",
         "miner_hotkey": result.miner_hotkey,
+        "miner_github": result.miner_github,
         "bundle_hash": result.bundle_hash,
         "val_bpb": result.hidden_eval.val_bpb,
         "benchmark_accuracy": result.hidden_eval.benchmark_accuracy,
@@ -203,6 +207,7 @@ def run_epoch(
                 "type": "submission_rejected",
                 "timestamp": time.time(),
                 "miner_hotkey": result["miner_hotkey"],
+                "miner_github": result.get("miner_github", ""),
                 "reason": result["reason"],
             })
             continue
@@ -214,6 +219,7 @@ def run_epoch(
             "type": "submission_scored",
             "timestamp": time.time(),
             "miner_hotkey": miner_hotkey,
+            "miner_github": result.get("miner_github", ""),
             "val_bpb": result["val_bpb"],
             "quality_gain": result["quality_gain"],
             "score": result["score"],
@@ -223,7 +229,9 @@ def run_epoch(
         })
 
         if result["accepted"]:
-            log_info(f"NEW KING: {miner_hotkey[:20]}... val_bpb={result['val_bpb']:.4f}")
+            gh = result.get("miner_github", "")
+            who = f"{gh} ({miner_hotkey[:12]}...)" if gh else f"{miner_hotkey[:20]}..."
+            log_info(f"NEW KING: {who} val_bpb={result['val_bpb']:.4f}")
             from chain_layer.interface import KingRecord
             king = chain.get_king()
             new_king = KingRecord(

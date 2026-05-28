@@ -4,7 +4,7 @@ A Bittensor subnet for decentralized, autonomous AI research. An open,
 continuously improving training recipe — and the public knowledge corpus
 behind it — built by an autonomous research network on Bittensor.
 
-📄 [Whitepaper (v1.1)](https://github.com/karpaai/karpa) · 🏷️ [Releases](https://github.com/karpaai/karpa/releases) · 💬 [Discussions & Results](https://github.com/orgs/karpaai/discussions)
+📄 [Whitepaper (v1.2)](https://github.com/karpaai/karpa) · 🏷️ [Releases](https://github.com/karpaai/karpa/releases) · 💬 [Discussions & Results](https://github.com/orgs/karpaai/discussions)
 
 ## What Karpa produces
 
@@ -53,35 +53,46 @@ The subnet and its token fund the production of these artifacts. They are not th
 └─────────────────────────────────────────────────────┘
 ```
 
-## Directory layout
+## Repo layout
 
-| Path | What | Patchable by miners? |
+Karpa lives across **two repos**:
+
+| Repo | What | Patchable by miners? |
 |---|---|---|
-| `model/` | Karpa-base — Llama-style transformer (RMSNorm, RoPE, SwiGLU, MHA) | Yes |
-| `recipe/` | Canonical training loop, optimizer config, LR schedule | Yes |
-| `data/` | Tokenizer, data manifest, dataset loader | Yes |
-| `configs/` | Training configs: `proxy` (125M), `default` (254M), `scale` (913M) | Yes |
-| `eval/` | Hidden-eval harness, val_bpb, benchmark mix | **Restricted** |
-| `calibration/` | Deterministic compute benchmark (matmul + attention) | **Restricted** |
-| `proof/` | Proof-test runner (future: Docker container) | **Restricted** |
-| `miner/` | Submission bundle assembly, HuggingFace upload, hotkey signing | Outside protocol |
-| `validator/` | Four cheap ops + scoring + Stage 5 audit | Outside recipe |
-| `dashboard/` | Karpa Live — Streamlit monitoring dashboard | — |
-| `scripts/` | `run_h100.sh` bootstrap, `noise_floor.py`, `smoke_test.py` | — |
+| **[karpaai/recipe](https://github.com/karpaai/recipe)** | `model/`, `recipe/`, `configs/`, `data/` — the canonical training recipe miners patch and the merged history of accepted improvements | **Yes** |
+| **karpaai/karpa** (this repo) | Protocol: validator, proof-test runner, attestation, scoring, submission tooling | **No** (restricted) |
+
+### This repo (protocol)
+
+| Path | What |
+|---|---|
+| `eval/` | Hidden-eval harness, val_bpb, benchmark mix |
+| `calibration/` | Deterministic compute benchmark (matmul + attention) |
+| `proof/` | Proof-test runner (future: Docker container) |
+| `miner/` | Submission bundle assembly, HuggingFace upload, hotkey signing |
+| `validator/` | Four cheap ops + scoring + Stage 5 audit |
+| `chain_layer/` | Bittensor + local-JSON chain abstractions |
+| `dashboard/` | Karpa Live — Streamlit monitoring dashboard |
+| `scripts/` | `miner_run.py`, `run_h100.sh`, `noise_floor.py`, `smoke_test.py`, `gpu.py` |
+| `karpa_bootstrap.py` | Adds the sibling recipe repo to `sys.path` for protocol code |
+
+The protocol code locates the recipe via `$KARPA_RECIPE_DIR` (defaults to `../recipe`). Clone both repos side-by-side and everything just works.
 
 ## Quick start
 
 ### CPU smoke test (no GPU needed)
 
 ```bash
+# Clone both repos side-by-side
 git clone https://github.com/karpaai/karpa.git
+git clone https://github.com/karpaai/recipe.git
 cd karpa
 python3 -m venv .venv && source .venv/bin/activate
 pip install torch numpy tiktoken cryptography
 
-# Generate synthetic data
-python -m data.prepare --source synthetic --out data/shards \
-    --shard-tokens 50000 --total-tokens 200000 --eval-tokens 10000
+# Generate synthetic data into the recipe repo
+(cd ../recipe && python -m data.prepare --source synthetic --out data/shards \
+    --shard-tokens 50000 --total-tokens 200000 --eval-tokens 10000)
 
 # Run end-to-end: two miners submit, validator scores, king changes
 python scripts/smoke_test.py
@@ -91,6 +102,7 @@ python scripts/smoke_test.py
 
 ```bash
 git clone https://github.com/karpaai/karpa.git
+git clone https://github.com/karpaai/recipe.git
 cd karpa
 bash scripts/run_h100.sh
 ```

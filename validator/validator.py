@@ -50,6 +50,7 @@ class ValidatorResult:
     miner_hotkey: str
     bundle_hash: str
     handshake_nonce: str
+    miner_github: str = ""  # self-declared attribution; informational only
     hidden_eval: HiddenEvalResult | None = None
     training_summary: dict | None = None
     calibration: dict | None = None
@@ -59,6 +60,7 @@ class ValidatorResult:
     def to_dict(self) -> dict:
         return {
             "miner_hotkey": self.miner_hotkey,
+            "miner_github": self.miner_github,
             "bundle_hash": self.bundle_hash,
             "handshake_nonce": self.handshake_nonce,
             "hidden_eval": asdict(self.hidden_eval) if self.hidden_eval else None,
@@ -143,11 +145,13 @@ def op2_attestation_verify(
 ) -> tuple[bool, str, str]:
     """Verify attestation. Returns (ok, detail, tier).
 
-    Tier-aware (whitepaper v1.1 §5.4):
+    Implements the v1.1 two-tier model:
       - If attestation.json is present and valid → tier = "verified"
       - If attestation.json is absent → tier = "unverified" (NOT rejected)
       - If attestation.json is present but INVALID → rejected (moral hazard:
         a failed verified claim is not silently downgraded to unverified)
+    Whitepaper v1.2 §5.4 retires this in favour of a single attested-execution
+    tier — code rewrite pending; see docs/whitepaper_v1.2_updates.md §B.2.
     """
     att_path = proof_dir / "attestation.json"
     if not att_path.exists():
@@ -249,6 +253,7 @@ def judge_submission(
     submission = json.loads(sub_path.read_text())
     result = ValidatorResult(
         miner_hotkey=submission["miner_hotkey"],
+        miner_github=submission.get("miner_github", ""),
         bundle_hash=submission["bundle_hash"],
         handshake_nonce=submission["handshake_nonce"],
     )

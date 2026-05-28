@@ -22,6 +22,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
+
 from miner.submit import assemble_submission, request_handshake_nonce
 from proof.runner import run_proof_test
 from validator.router import process_submission

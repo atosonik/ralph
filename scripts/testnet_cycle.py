@@ -26,6 +26,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
+
 from chain_layer.config import get_chain
 from proof.runner import run_proof_test
 from validator.validator import judge_submission

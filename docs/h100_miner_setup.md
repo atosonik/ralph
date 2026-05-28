@@ -21,25 +21,26 @@ python scripts/gpu.py ssh            # SSH in
 
 ## 2. Bootstrap on the H100
 
-Inside the rented box:
+Inside the rented box, clone **both** repos side-by-side:
 
 ```bash
-# Clone the repo (private — use a deploy key or PAT)
-git clone git@github.com:karpaai/karpa.git
-cd karpa
+git clone https://github.com/karpaai/karpa.git
+git clone https://github.com/karpaai/recipe.git
 
-# venv + deps
+cd karpa
 python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[hub]'    # includes huggingface_hub + bittensor
 
-# Data
-python -m data.prepare \
+# Prepare training data inside the recipe repo
+(cd ../recipe && python -m data.prepare \
   --source fineweb-edu \
   --out data/shards \
   --total-tokens 1_000_000_000 \
-  --eval-tokens 5_000_000
+  --eval-tokens 5_000_000)
 ```
+
+The protocol auto-resolves the recipe via `../recipe` — no flag needed. To put it elsewhere, set `KARPA_RECIPE_DIR=/path/to/recipe` in `.env`.
 
 ## 3. Bittensor wallet + HF token
 
@@ -91,21 +92,16 @@ Baseline (empty patch — establishes you as a participant):
   --tier unverified
 ```
 
-A patch that tweaks the recipe:
+A patch that tweaks the recipe — generate the diff from your edits in `../recipe`:
 
 ```bash
-cat > patches/raise_lr.diff <<'EOF'
---- a/configs/proxy_h100.json
-+++ b/configs/proxy_h100.json
-@@ ... @@
--  "max_lr": 0.003,
-+  "max_lr": 0.004,
-EOF
+# Edit configs/h100_proxy.json in the recipe repo, then:
+(cd ../recipe && git diff main) > patches/raise_lr.diff
 
 .venv/bin/python scripts/miner_run.py \
   --patch patches/raise_lr.diff \
   --label round2_raise_lr \
-  --config configs/proxy_h100.json \
+  --config configs/h100_proxy.json \
   --tier unverified
 ```
 

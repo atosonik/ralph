@@ -147,11 +147,11 @@ Requires an H100 GPU. The script handles everything: venv, dependencies, data pr
 | `--wandb` flag in `recipe/train.py` | Live training monitoring at wandb.ai — loss, lr, grad norms, throughput, every step |
 | `dashboard/app.py` | Streamlit dashboard: king status, submission feed, noise floor, loss curves |
 | `miner/hub.py` | HuggingFace Hub integration: upload/download proof bundles to `karpaai/proof-bundles` |
-| Two-tier scoring (`validator/scoring.py`) | Verified (α=1.0) vs unverified (α=0.5) credibility model per whitepaper v1.1 §5.4 |
+| Two-tier scoring (`validator/scoring.py`) | Verified (α=1.0) vs unverified (α=0.5) credibility model — implemented against whitepaper v1.1 §5.4; v1.2 collapsed this to a single attested-execution tier, code rewrite pending |
 | Stage 5 audit (`validator/audit.py`) | Score-and-trajectory equivalence checking (not hash equality) per §5.2 |
 
 ---
 
 🔗 **Repo:** [github.com/karpaai/karpa](https://github.com/karpaai/karpa)
 🏷️ **This milestone:** [`v0.5.0`](https://github.com/karpaai/karpa/releases/tag/v0.5.0) — exact code snapshot for this phase
-📄 **Whitepaper:** v1.1 (available in repo)
+📄 **Whitepaper:** v1.2 (current)
