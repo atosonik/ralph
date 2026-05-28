@@ -45,12 +45,24 @@ from chain_layer.config import get_chain
 from validator.validator import judge_submission
 from validator.scoring import score_bundle
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-log = logging.getLogger("validator")
+# Bittensor's bt.logging hijacks Python's logging module and raises the root
+# level to WARNING, silencing our INFO messages. Use direct prints with
+# timestamps so our output always appears regardless of what bittensor does.
+def _ts() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+def log_info(msg: str) -> None:
+    print(f"{_ts()} [INFO] {msg}", flush=True)
+
+def log_warn(msg: str) -> None:
+    print(f"{_ts()} [WARN] {msg}", flush=True)
+
+def log_err(msg: str) -> None:
+    print(f"{_ts()} [ERROR] {msg}", flush=True)
+
+def log_debug(msg: str) -> None:
+    if os.environ.get("AUTORALPH_DEBUG"):
+        print(f"{_ts()} [DEBUG] {msg}", flush=True)
 
 AUTORALPH_ROOT = Path(__file__).resolve().parent.parent
 SHUTDOWN = False
@@ -58,7 +70,7 @@ SHUTDOWN = False
 
 def _signal_handler(sig, frame):
     global SHUTDOWN
-    log.info("shutdown signal received, finishing current epoch...")
+    log_info("shutdown signal received, finishing current epoch...")
     SHUTDOWN = True
 
 
@@ -148,19 +160,19 @@ def run_epoch(
     if not bundles:
         return {"submissions": 0, "accepted": 0, "rejected": 0}
 
-    log.info(f"found {len(bundles)} pending submission(s)")
+    log_info(f"found {len(bundles)} pending submission(s)")
     epoch_results = {"submissions": len(bundles), "accepted": 0, "rejected": 0}
     round_scores: dict[str, float] = {}
 
     for bundle_dir in bundles:
         bundle_id = bundle_dir.name
-        log.info(f"scoring {bundle_id}...")
+        log_info(f"scoring {bundle_id}...")
 
         try:
             result = score_and_decide(chain, bundle_dir, noise_floor_margin)
         except Exception as e:
-            log.error(f"error scoring {bundle_id}: {e}")
-            log.debug(traceback.format_exc())
+            log_err(f"error scoring {bundle_id}: {e}")
+            log_debug(traceback.format_exc())
             archive_bundle(bundle_dir, queue_dir, "rejected")
             epoch_results["rejected"] += 1
             chain.append_event({
@@ -172,7 +184,7 @@ def run_epoch(
             continue
 
         if result["status"] == "rejected":
-            log.warning(f"rejected {bundle_id}: {result['reason']}")
+            log_warn(f"rejected {bundle_id}: {result['reason']}")
             archive_bundle(bundle_dir, queue_dir, "rejected")
             epoch_results["rejected"] += 1
             chain.append_event({
@@ -199,7 +211,7 @@ def run_epoch(
         })
 
         if result["accepted"]:
-            log.info(f"NEW KING: {miner_hotkey[:20]}... val_bpb={result['val_bpb']:.4f}")
+            log_info(f"NEW KING: {miner_hotkey[:20]}... val_bpb={result['val_bpb']:.4f}")
             from chain_layer.interface import KingRecord
             king = chain.get_king()
             new_king = KingRecord(
@@ -217,7 +229,7 @@ def run_epoch(
             chain.set_king(new_king)
             epoch_results["accepted"] += 1
         else:
-            log.info(f"below threshold: {miner_hotkey[:20]}... gain={result['quality_gain']:+.4f}")
+            log_info(f"below threshold: {miner_hotkey[:20]}... gain={result['quality_gain']:+.4f}")
 
         archive_bundle(bundle_dir, queue_dir, "scored")
 
@@ -228,7 +240,7 @@ def run_epoch(
             round_scores[king.miner_hotkey] = max(
                 round_scores.get(king.miner_hotkey, 0), 1.0
             )
-        log.info(f"setting weights for {len(round_scores)} miners...")
+        log_info(f"setting weights for {len(round_scores)} miners...")
         chain.set_weights(round_scores)
 
     return epoch_results
@@ -244,9 +256,9 @@ def main():
     p.add_argument("--once", action="store_true", help="Run one epoch then exit")
     args = p.parse_args()
 
-    log.info("=" * 60)
-    log.info("  AutoRalph Validator Service")
-    log.info("=" * 60)
+    log_info("=" * 60)
+    log_info("  AutoRalph Validator Service")
+    log_info("=" * 60)
 
     chain = get_chain(AUTORALPH_ROOT)
     args.queue_dir.mkdir(parents=True, exist_ok=True)
@@ -254,42 +266,42 @@ def main():
 
     king = chain.get_king()
     if king:
-        log.info(f"current king: {king.miner_hotkey[:20]}... val_bpb={king.val_bpb:.4f}")
+        log_info(f"current king: {king.miner_hotkey[:20]}... val_bpb={king.val_bpb:.4f}")
     else:
-        log.info("no king yet — first submission will be crowned")
+        log_info("no king yet — first submission will be crowned")
 
-    log.info(f"queue: {args.queue_dir}")
-    log.info(f"epoch interval: {args.epoch_seconds}s")
-    log.info(f"noise floor margin: {args.noise_floor}")
-    log.info(f"submit bundles to: {args.queue_dir / 'pending' / '<bundle_id>/'}")
-    log.info("")
+    log_info(f"queue: {args.queue_dir}")
+    log_info(f"epoch interval: {args.epoch_seconds}s")
+    log_info(f"noise floor margin: {args.noise_floor}")
+    log_info(f"submit bundles to: {args.queue_dir / 'pending' / '<bundle_id>/'}")
+    log_info("")
 
     epoch = 0
     while not SHUTDOWN:
         epoch += 1
-        log.info(f"--- epoch {epoch} ---")
+        log_info(f"--- epoch {epoch} ---")
 
         try:
             result = run_epoch(chain, args.queue_dir, args.noise_floor)
             if result["submissions"] > 0:
-                log.info(f"epoch {epoch}: {result['submissions']} submissions, "
+                log_info(f"epoch {epoch}: {result['submissions']} submissions, "
                          f"{result['accepted']} accepted, {result['rejected']} rejected")
             else:
-                log.info(f"epoch {epoch}: no pending submissions")
+                log_info(f"epoch {epoch}: no pending submissions")
         except Exception as e:
-            log.error(f"epoch {epoch} failed: {e}")
-            log.debug(traceback.format_exc())
+            log_err(f"epoch {epoch} failed: {e}")
+            log_debug(traceback.format_exc())
 
         if args.once:
             break
 
-        log.info(f"sleeping {args.epoch_seconds}s until next epoch...")
+        log_info(f"sleeping {args.epoch_seconds}s until next epoch...")
         for _ in range(args.epoch_seconds):
             if SHUTDOWN:
                 break
             time.sleep(1)
 
-    log.info("validator service stopped")
+    log_info("validator service stopped")
 
 
 if __name__ == "__main__":
