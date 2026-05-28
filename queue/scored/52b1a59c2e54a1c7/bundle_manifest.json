@@ -1,0 +1,13 @@
+{
+  "attestation_sha256": null,
+  "bundle_hash": "52b1a59c2e54a1c7f25eb633604604aa35d00400ae2bb06993c17af5bbfb9fd9",
+  "calibration_sha256": "9496fc59f07ec432615594e9dc10e184fdc6905155ad01900309277c11965008",
+  "checkpoint_sha256": "6c646a2e6ad1a7a7dcac00c1430a5830c7a584b4e390cd289a2a08ee0dcb0cc9",
+  "container_measurement": "ad62f1334f54bd02e5b95739ef366bfd8d7ecfaa8993a898aef7e3c6050c896e",
+  "declared_seed": 43,
+  "final_state_sha256": "401723962db92ee10bba0e54dbda141ef599dd628f63329cae40930170002706",
+  "handshake_nonce": "0x98c35654f941605ff74d8912fed1d035c4c55483512384355bf3735c096bc990",
+  "patch_sha256": "14857601217f2d6031c57153d4f4b91900faf3e3546497455b3445cff326b581",
+  "tier": "unverified",
+  "training_log_sha256": "1b21296b8b6785145f64a3d9dcb226e2151769e9e767b52daf79a07aecbee8b6"
+}

@@ -1,0 +1,11 @@
+{
+  "version": "phase0-v1",
+  "device": "cpu",
+  "dtype": "float32",
+  "matmul_ms": 28.806752804666758,
+  "attention_ms": 22.292962297797203,
+  "collective_ms": 0.041089486330747604,
+  "total_ms": 51.14080458879471,
+  "gpu_name": null,
+  "cuda_available": false
+}

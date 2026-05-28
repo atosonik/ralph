@@ -1,0 +1,13 @@
+{
+  "attestation_sha256": null,
+  "bundle_hash": "4ee92f4c95d97def97e7a6c443cdada500f923fb75c26448ec125f3c0e15fb9b",
+  "calibration_sha256": "f5a0159f213108c3df41d8f2e7012c696a31b28da466ac7bdbb8ba1a088116e3",
+  "checkpoint_sha256": "62dbfbdc56549dfe2c5b94487dfff246c7702d0a8524aa1252e50d38d28f7745",
+  "container_measurement": "8d998e802af56e0fd9d1b3acc8c692f32dabf15e4234b12b597e7df424719f9d",
+  "declared_seed": 42,
+  "final_state_sha256": "84422c083186b11dd2271b1075549b3701f0e0f400c735143ae7182e09eb3303",
+  "handshake_nonce": "0xf5201f08f312e29a00fe42a4266ae0422b52d577a96fd9aee485fc8746525968",
+  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "tier": "unverified",
+  "training_log_sha256": "e845ff0d906951caaf62a3f82e747d5fac81039004e1626375931c746f86ae38"
+}

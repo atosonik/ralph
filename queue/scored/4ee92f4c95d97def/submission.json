@@ -1,0 +1,10 @@
+{
+  "bundle_hash": "4ee92f4c95d97def97e7a6c443cdada500f923fb75c26448ec125f3c0e15fb9b",
+  "handshake_nonce": "0xf5201f08f312e29a00fe42a4266ae0422b52d577a96fd9aee485fc8746525968",
+  "miner_hotkey": "5Hotkey1",
+  "patch_path": "runs/testnet_svc/m1_sub/patch.diff",
+  "proof_dir": "runs/testnet_svc/m1_proof",
+  "public_key_hex": "fad4d3c6cb0e5e19a7ce5e3bb22fe0b625a49cb7c40b9badd77de54b18d95eb5",
+  "signature_hex": "24d49bcaf42132dc35bc06f6803e695b5dbf6a7ab391e010aa50762331a652ca25ebd0a2c4bbb213c38e77db43c851105823de933fc42fb8779c18484f22c607",
+  "submitted_at": 1779928873.8662405
+}

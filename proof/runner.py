@@ -115,7 +115,7 @@ def apply_patch(workdir: Path, patch_path: Path) -> None:
         # calibration runs. Nothing to do.
         return
     result = subprocess.run(
-        ["patch", "-p1", "-i", str(patch_path), "--no-backup-if-mismatch"],
+        ["patch", "-p1", "-i", str(patch_path.resolve()), "--no-backup-if-mismatch"],
         cwd=workdir,
         capture_output=True,
         text=True,
