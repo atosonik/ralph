@@ -320,6 +320,39 @@ def run_epoch(
                     log_warn(f"recipe release failed: {e}")
             elif pr_url and not bot_token:
                 log_warn(f"king changed with PR {pr_url} but KARPA_BOT_GH_TOKEN unset — manual merge needed")
+
+            # Merge the corresponding HF PR (if the bundle came from one).
+            hf_pr_path = bundle_dir / ".hf_pr.json"
+            if hf_pr_path.exists():
+                import json as _json
+                hf_pr = _json.loads(hf_pr_path.read_text())
+                hf_token = os.environ.get("KARPA_BOT_HF_TOKEN") or os.environ.get("HF_TOKEN", "")
+                if hf_token:
+                    from validator.hf_bot import merge_pr as hf_merge_pr
+                    res = hf_merge_pr(
+                        repo_id=hf_pr["repo_id"],
+                        pr_num=hf_pr["pr_num"],
+                        token=hf_token,
+                        comment=(
+                            f"Crowned king. val_bpb={result['val_bpb']:.4f}, "
+                            f"quality_gain={result['quality_gain']:+.4f}, "
+                            f"miner={result.get('miner_github') or miner_hotkey[:12]}."
+                        ),
+                    )
+                    if res.merged:
+                        log_info(f"HF PR #{res.pr_num} merged on {hf_pr['repo_id']}")
+                    else:
+                        log_warn(f"HF PR #{res.pr_num} merge failed: {res.detail}")
+                    chain.append_event({
+                        "type": "hf_pr_merged" if res.merged else "hf_pr_merge_failed",
+                        "timestamp": time.time(),
+                        "repo_id": hf_pr["repo_id"],
+                        "pr_num": res.pr_num,
+                        "miner_hotkey": miner_hotkey,
+                        "detail": res.detail,
+                    })
+                else:
+                    log_warn(f"king changed but no HF token to merge PR #{hf_pr['pr_num']}")
         else:
             log_info(f"below threshold: {miner_hotkey[:20]}... gain={result['quality_gain']:+.4f}")
 

@@ -37,12 +37,19 @@ def upload_bundle(
     repo_id: str = "karpaai/proof-bundles",
     token: str | None = None,
 ) -> str:
-    """Upload a proof bundle to HuggingFace Hub. Returns the commit URL."""
-    from huggingface_hub import HfApi
+    """Upload a proof bundle as a single HF PR. Returns the PR URL.
+
+    Miners aren't org members on karpaai, so direct commits to main are
+    forbidden. Instead we stage all the bundle files into one folder and
+    push them via `create_pr=True` — community PR pattern. The validator
+    side polls open PRs, scores, and the bot merges the winner.
+    """
+    from huggingface_hub import HfApi, CommitOperationAdd
+    import tempfile
+    import shutil
 
     api = HfApi(token=token)
 
-    # Ensure repo exists.
     try:
         api.create_repo(repo_id, repo_type="dataset", exist_ok=True)
     except Exception:
@@ -53,41 +60,43 @@ def upload_bundle(
     bundle_hash = manifest["bundle_hash"]
     prefix = f"submissions/{bundle_hash[:16]}"
 
-    files_to_upload = [
-        ("bundle_manifest.json", proof_dir / "bundle_manifest.json"),
-        ("calibration.json", proof_dir / "calibration.json"),
+    # Collect (local_path, name_in_bundle) pairs.
+    files: list[tuple[Path, str]] = [
+        (proof_dir / "bundle_manifest.json", "bundle_manifest.json"),
+        (proof_dir / "calibration.json",     "calibration.json"),
     ]
     training_dir = proof_dir / "training"
     if training_dir.exists():
         for name in ["checkpoint.pt", "training_log.jsonl", "final_state.json",
-                      "wandb_metrics.json", "wandb_run_url.txt"]:
-            path = training_dir / name
-            if path.exists():
-                files_to_upload.append((name, path))
+                     "wandb_metrics.json", "wandb_run_url.txt"]:
+            p = training_dir / name
+            if p.exists():
+                files.append((p, name))
+    for name in ["attestation.json", "submission.json"]:
+        p = proof_dir / name
+        if p.exists():
+            files.append((p, name))
 
-    att_path = proof_dir / "attestation.json"
-    if att_path.exists():
-        files_to_upload.append(("attestation.json", att_path))
+    operations = [
+        CommitOperationAdd(path_in_repo=f"{prefix}/{remote_name}", path_or_fileobj=str(local_path))
+        for (local_path, remote_name) in files
+        if local_path.exists()
+    ]
+    total_mb = sum(p.stat().st_size for (p, _) in files if p.exists()) / 1e6
+    print(f"[hub] uploading {len(operations)} files ({total_mb:.1f} MB) as PR → {repo_id}/{prefix}")
 
-    sub_path = proof_dir / "submission.json"
-    if sub_path.exists():
-        files_to_upload.append(("submission.json", sub_path))
+    commit_info = api.create_commit(
+        repo_id=repo_id,
+        repo_type="dataset",
+        operations=operations,
+        commit_message=f"Submit proof bundle {bundle_hash[:12]}",
+        commit_description=f"Bundle hash: `{bundle_hash}`\nManifest sha256: `{manifest.get('manifest_sha256', '?')}`",
+        create_pr=True,
+    )
 
-    print(f"[hub] uploading {len(files_to_upload)} files to {repo_id}/{prefix}")
-    for remote_name, local_path in files_to_upload:
-        api.upload_file(
-            path_or_fileobj=str(local_path),
-            path_in_repo=f"{prefix}/{remote_name}",
-            repo_id=repo_id,
-            repo_type="dataset",
-            commit_message=f"Upload proof bundle {bundle_hash[:12]}",
-        )
-        size_mb = local_path.stat().st_size / 1e6
-        print(f"  {remote_name}: {size_mb:.1f} MB")
-
-    url = f"https://huggingface.co/datasets/{repo_id}/tree/main/{prefix}"
-    print(f"[hub] done: {url}")
-    return url
+    pr_url = commit_info.pr_url or commit_info.commit_url
+    print(f"[hub] PR: {pr_url}")
+    return pr_url
 
 
 def download_bundle(

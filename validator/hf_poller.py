@@ -40,24 +40,37 @@ def _save_state(queue_dir: Path, state: dict) -> None:
     _state_path(queue_dir).write_text(json.dumps(state, indent=2))
 
 
-def list_remote_submissions(repo_id: str, token: Optional[str] = None) -> list[str]:
-    """Return the list of submission bundle IDs present in the HF repo."""
+def list_remote_submissions(repo_id: str, token: Optional[str] = None) -> list[dict]:
+    """Return the open HF PRs against the dataset, each as a dict with
+    bundle_id (= directory prefix under submissions/), pr_num, git_ref."""
     from huggingface_hub import HfApi
 
     api = HfApi(token=token)
     try:
-        files = api.list_repo_files(repo_id, repo_type="dataset")
+        discussions = api.get_repo_discussions(repo_id=repo_id, repo_type="dataset")
     except Exception as e:
-        print(f"[hf_poller] list_repo_files failed: {e}")
+        print(f"[hf_poller] get_repo_discussions failed: {e}")
         return []
 
-    bundle_ids = set()
-    for f in files:
-        if f.startswith("submissions/"):
-            parts = f.split("/")
-            if len(parts) >= 2 and parts[1]:
-                bundle_ids.add(parts[1])
-    return sorted(bundle_ids)
+    pending = []
+    for d in discussions:
+        if not d.is_pull_request:
+            continue
+        if d.status != "open":
+            continue
+        # Each PR has a git_reference like 'refs/pr/3'. Files under
+        # submissions/<bundle_id>/ are what we want; find the bundle_id by
+        # listing the PR's commit tree.
+        ref = d.git_reference  # e.g. "refs/pr/3"
+        try:
+            files = api.list_repo_files(repo_id, repo_type="dataset", revision=ref)
+        except Exception as e:
+            print(f"[hf_poller] list PR #{d.num} files failed: {e}")
+            continue
+        bundle_ids = {f.split("/")[1] for f in files if f.startswith("submissions/") and len(f.split("/")) >= 3}
+        for bid in bundle_ids:
+            pending.append({"bundle_id": bid, "pr_num": d.num, "git_ref": ref})
+    return pending
 
 
 def download_one(
@@ -65,8 +78,15 @@ def download_one(
     repo_id: str,
     dest_dir: Path,
     token: Optional[str] = None,
+    git_ref: str = "main",
+    pr_num: int | None = None,
 ) -> bool:
-    """Download all files for one bundle into dest_dir/<bundle_id>/."""
+    """Download all files for one bundle into dest_dir/<bundle_id>/.
+
+    git_ref is the revision to read from — `main` for legacy direct-commit
+    flows, `refs/pr/N` for PR-based submissions (the default since miners
+    aren't org members on karpaai).
+    """
     from huggingface_hub import hf_hub_download, list_repo_files
 
     out = dest_dir / bundle_id
@@ -82,15 +102,15 @@ def download_one(
     }
 
     try:
-        all_files = list_repo_files(repo_id, repo_type="dataset", token=token)
+        all_files = list_repo_files(repo_id, repo_type="dataset", token=token, revision=git_ref)
         prefix = f"submissions/{bundle_id}/"
         bundle_files = [f for f in all_files if f.startswith(prefix)]
     except Exception as e:
-        print(f"[hf_poller] list files failed for {bundle_id}: {e}")
+        print(f"[hf_poller] list files failed for {bundle_id} @ {git_ref}: {e}")
         return False
 
     if not bundle_files:
-        print(f"[hf_poller] no files found for {bundle_id}")
+        print(f"[hf_poller] no files found for {bundle_id} @ {git_ref}")
         return False
 
     success = 0
@@ -103,6 +123,7 @@ def download_one(
                 repo_type="dataset",
                 local_dir=str(out / "_hf_cache"),
                 token=token,
+                revision=git_ref,
             )
             dest = (training_dir / filename) if filename in training_files else (out / filename)
             shutil.copy2(local, dest)
@@ -117,6 +138,10 @@ def download_one(
     if success == 0:
         shutil.rmtree(out)
         return False
+
+    # Annotate which PR this came from so the validator can merge later.
+    if pr_num is not None:
+        (out / ".hf_pr.json").write_text(json.dumps({"pr_num": pr_num, "git_ref": git_ref, "repo_id": "karpaai/proof-bundles"}, indent=2))
     return True
 
 
@@ -137,24 +162,27 @@ def poll_hub(
     state = _load_state(queue_dir)
     processed = set(state.get("processed", []))
 
-    remote_ids = list_remote_submissions(repo_id, token=token)
-    if not remote_ids:
+    remote_prs = list_remote_submissions(repo_id, token=token)
+    if not remote_prs:
         return []
 
-    new_ids = [bid for bid in remote_ids if bid not in processed]
-    if not new_ids:
+    new = [p for p in remote_prs if p["bundle_id"] not in processed]
+    if not new:
         return []
 
-    print(f"[hf_poller] found {len(new_ids)} new bundle(s) on HF Hub: {[b[:8] for b in new_ids[:limit]]}")
+    summary = [(p["bundle_id"][:8], f"PR#{p['pr_num']}") for p in new[:limit]]
+    print(f"[hf_poller] found {len(new)} new PR-bundle(s) on HF Hub: {summary}")
 
     downloaded = []
-    for bundle_id in new_ids[:limit]:
-        print(f"[hf_poller] downloading {bundle_id}...")
-        if download_one(bundle_id, repo_id, pending, token=token):
-            downloaded.append(bundle_id)
-            processed.add(bundle_id)
+    for sub in new[:limit]:
+        bid = sub["bundle_id"]
+        print(f"[hf_poller] downloading {bid} from PR #{sub['pr_num']} ({sub['git_ref']})...")
+        if download_one(bid, repo_id, pending, token=token,
+                        git_ref=sub["git_ref"], pr_num=sub["pr_num"]):
+            downloaded.append(bid)
+            processed.add(bid)
         else:
-            print(f"[hf_poller] skipped {bundle_id} (download failed)")
+            print(f"[hf_poller] skipped {bid} (download failed)")
 
     state["processed"] = sorted(processed)
     _save_state(queue_dir, state)
