@@ -152,7 +152,7 @@ def _diff_is_nontrivial(patch_path: Path) -> bool:
     for line in text.splitlines():
         if line.startswith("diff --git ") or line.startswith("+++ ") or line.startswith("--- "):
             ll = line.lower()
-            if any(t in ll for t in ("recipe/", "training", "/optim", ".yaml", ".yml")):
+            if any(t in ll for t in ("recipe/", "training", "/optim", "configs/", ".yaml", ".yml", ".json", ".toml")):
                 touches_training = True
             continue
         if line.startswith("+") or line.startswith("-"):

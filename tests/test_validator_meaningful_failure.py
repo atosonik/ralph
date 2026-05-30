@@ -131,6 +131,26 @@ def test_diff_nontrivial(tmp_path):
     assert _diff_is_nontrivial(p) is True
 
 
+def test_diff_nontrivial_configs_json(tmp_path):
+    """A diff against configs/*.json (e.g. proxy_cpu_smoke.json) should count
+    as touching training — config files are training-relevant."""
+    diff = """diff --git a/configs/proxy_cpu_smoke.json b/configs/proxy_cpu_smoke.json
+--- a/configs/proxy_cpu_smoke.json
++++ b/configs/proxy_cpu_smoke.json
+@@ -9,10 +9,10 @@
+   "seq_len": 128,
+-  "total_steps": 20,
++  "total_steps": 25,
+-  "max_lr": 0.003,
+-  "min_lr": 0.0003,
++  "max_lr": 0.0035,
++  "min_lr": 0.00035,
+"""
+    p = tmp_path / "p.diff"
+    p.write_text(diff)
+    assert _diff_is_nontrivial(p) is True
+
+
 # ----------------------------------------------------------------------------
 # _rationale_is_coherent
 # ----------------------------------------------------------------------------
