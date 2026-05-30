@@ -1,10 +1,12 @@
 # Karpa
 
+<img src="docs/assets/karpa-mark.png" width="80" align="right" alt="Karpa logo" />
+
 A Bittensor subnet for decentralized, autonomous AI research. An open,
 continuously improving training recipe — and the public knowledge corpus
 behind it — built by an autonomous research network on Bittensor.
 
-📄 [Whitepaper (v1.2)](https://github.com/karpaai/karpa) · 🏷️ [Releases](https://github.com/karpaai/karpa/releases) · 💬 [Discussions & Results](https://github.com/orgs/karpaai/discussions)
+🌐 [karpa.ai](https://karpa.ai) · 📄 [Whitepaper v1.2](docs/Karpa-Whitepaper-v1.2.pdf) · 🏷️ [Releases](https://github.com/karpaai/karpa/releases) · 📊 [Wandb](https://wandb.ai/karpaai-hub/karpa) · 💬 [Discussions](https://github.com/orgs/karpaai/discussions)
 
 ## What Karpa produces
 

@@ -25,7 +25,7 @@ Draft tweets for initial visibility. Post in order, ~1-2 per day.
 >
 > All open source. Watch the run live ↓
 >
-> wandb.ai/karpaai/karpa
+> wandb.ai/karpaai-hub/karpa
 
 ---
 

@@ -37,7 +37,7 @@ Cheaper proof tests → lower barrier to submit → more patches competing → f
 
 | Feature | What it does |
 |---|---|
-| **wandb live monitoring** | `--wandb` flag streams loss/lr/grad_norm/throughput to [wandb.ai/karpaai/karpa](https://wandb.ai/karpaai/karpa). Public — anyone can view. |
+| **wandb live monitoring** | `--wandb` flag streams loss/lr/grad_norm/throughput to [wandb.ai/karpaai-hub/karpa](https://wandb.ai/karpaai-hub/karpa). Public — anyone can view. |
 | **wandb metrics in proof bundles** | Training traces auto-exported as `wandb_metrics.json` alongside checkpoints. Miners submit their complete training story, not just the final number. |
 | **Karpa Live dashboard** | Streamlit dashboard with auto-refreshing loss curves, king status, noise floor stats. `streamlit run dashboard/app.py` |
 | **HuggingFace Hub integration** | `miner/hub.py` — upload/download proof bundles to HuggingFace. Checkpoints + logs + wandb traces + attestation, all content-addressed. |
@@ -46,7 +46,7 @@ Cheaper proof tests → lower barrier to submit → more patches competing → f
 
 Watch the bf16 Karpa-1 training on wandb (public):
 
-🔗 **wandb:** https://wandb.ai/karpaai/karpa
+🔗 **wandb:** https://wandb.ai/karpaai-hub/karpa
 
 ## How to reproduce
 
@@ -77,4 +77,4 @@ python -m recipe.train \
 🔗 **Repo:** [github.com/karpaai/karpa](https://github.com/karpaai/karpa)
 🏷️ **This milestone:** [`v0.5.1`](https://github.com/karpaai/karpa/releases/tag/v0.5.1)
 💬 **Discussions:** [github.com/orgs/karpaai/discussions](https://github.com/orgs/karpaai/discussions)
-📊 **wandb:** [wandb.ai/karpaai/karpa](https://wandb.ai/karpaai/karpa)
+📊 **wandb:** [wandb.ai/karpaai-hub/karpa](https://wandb.ai/karpaai-hub/karpa)
