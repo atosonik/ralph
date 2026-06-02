@@ -69,3 +69,13 @@ class ChainInterface(ABC):
     @abstractmethod
     def get_events(self, limit: int = 100) -> list[dict]:
         """Return recent events, newest first."""
+
+    def blacklist(self, hotkey: str, reason: str = "") -> None:
+        """Mark a miner-hotkey as blacklisted. Subsequent set_weights MUST
+        zero its weight regardless of round_scores. Default no-op so
+        backends can opt in incrementally."""
+        pass
+
+    def is_blacklisted(self, hotkey: str) -> bool:
+        """Check if a miner-hotkey is blacklisted. Default False."""
+        return False

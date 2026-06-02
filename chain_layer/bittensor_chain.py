@@ -41,6 +41,28 @@ import torch
 from .interface import ChainInterface, HandshakeRecord, KingRecord
 
 
+def _locked_append(path: Path, text: str) -> None:
+    """Append text to a file with an advisory exclusive lock.
+
+    Prevents interleaved bytes when multiple processes (miner + validator,
+    or two validators) share the same chain_dir on a single host. fcntl is
+    POSIX-only; on platforms without it we fall back to plain append (which
+    is fine for the common single-writer case).
+    """
+    try:
+        import fcntl
+        with path.open("a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(text)
+                f.flush()
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except ImportError:  # pragma: no cover — Windows
+        with path.open("a") as f:
+            f.write(text)
+
+
 class BittensorChain(ChainInterface):
 
     def __init__(
@@ -82,28 +104,50 @@ class BittensorChain(ChainInterface):
         self.metagraph.sync(subtensor=self.subtensor)
 
     def request_handshake_nonce(self, miner_hotkey: str, patch_hash: str) -> str:
-        """Commit a handshake on-chain via subtensor.commit().
+        """Commit a handshake on-chain via subtensor.set_commitment().
 
         The commit binds the miner's hotkey to a nonce + patch hash, recorded
         on-chain at a specific block. Validators verify the commitment exists
         before scoring the submission.
+
+        deep_review_2026-05-31 #6: the previous code called subtensor.commit(),
+        which does NOT exist on bittensor 10.4.0 — the method is
+        set_commitment(). The AttributeError was being swallowed silently,
+        meaning no handshake has ever made it on-chain (this is the root
+        cause of KARPA_SKIP_HANDSHAKE=1 being mandatory until now).
+
+        We now raise on commit failure so the miner gets an explicit
+        rejection instead of a "successful" handshake that's actually
+        invisible to the chain.
         """
         nonce = "0x" + secrets.token_hex(32)
         commit_data = f"karpa:handshake:{miner_hotkey}:{patch_hash}:{nonce}"
         commit_hash = hashlib.sha256(commit_data.encode()).hexdigest()
 
         try:
-            self.subtensor.commit(
+            self.subtensor.set_commitment(
                 wallet=self.wallet,
                 netuid=self.netuid,
                 data=commit_hash,
             )
             print(f"[chain] handshake committed on-chain: {commit_hash[:16]}...")
+        except AttributeError:
+            # SDK version drift — fail loudly so we don't silently lose commits.
+            raise RuntimeError(
+                "bittensor SDK has no set_commitment method. "
+                "Expected method on bittensor>=10.0. Got attrs containing "
+                f"'commit': {[a for a in dir(self.subtensor) if 'commit' in a.lower()][:5]}"
+            )
         except Exception as e:
-            print(f"[chain] on-chain commit failed ({e}), storing locally only")
+            # Real on-chain failures (rate limit, RPC down, insufficient
+            # balance, etc) must propagate so the miner can retry instead of
+            # shipping a bundle the validator will then reject for missing
+            # handshake.
+            raise RuntimeError(f"on-chain commit failed: {type(e).__name__}: {e}")
 
         # Also store locally for lookup (on-chain commit is a hash; we need
-        # the full record to verify).
+        # the full record to verify). Uses fcntl.LOCK_EX so concurrent
+        # miners on the same host don't interleave bytes.
         entry = {
             "type": "proof_test_handshake",
             "timestamp": time.time(),
@@ -113,8 +157,7 @@ class BittensorChain(ChainInterface):
             "commit_hash": commit_hash,
             "block": self._current_block(),
         }
-        with (self.chain_dir / "handshakes.jsonl").open("a") as f:
-            f.write(json.dumps(entry) + "\n")
+        _locked_append(self.chain_dir / "handshakes.jsonl", json.dumps(entry) + "\n")
         return nonce
 
     def lookup_handshake(self, nonce: str) -> Optional[HandshakeRecord]:
@@ -161,6 +204,11 @@ class BittensorChain(ChainInterface):
         uids = []
         weights = []
         for hotkey, score in hotkey_scores.items():
+            # Blacklisted miners get zero weight regardless of score
+            # (deep_review_2026-05-31 #13: audit consequence channel).
+            if self.is_blacklisted(hotkey):
+                print(f"[chain] zeroing blacklisted miner {hotkey[:16]}...")
+                continue
             uid = self.get_uid(hotkey)
             if uid is not None:
                 uids.append(uid)
@@ -176,8 +224,6 @@ class BittensorChain(ChainInterface):
         uid_tensor = torch.tensor(uids, dtype=torch.int64)
         weight_tensor = torch.tensor(weights, dtype=torch.float32)
 
-        cr_enabled = self.subtensor.commit_reveal_enabled(netuid=self.netuid)
-
         try:
             # Skip if rate limited — try again next epoch (don't block service).
             rl = self.subtensor.weights_rate_limit(netuid=self.netuid)
@@ -191,56 +237,32 @@ class BittensorChain(ChainInterface):
                           f"skipping set_weights — will retry next epoch (~{wait_blocks * 12}s)")
                     return False
 
-            if cr_enabled:
-                result = self.subtensor.commit_weights(
-                    wallet=self.wallet,
-                    netuid=self.netuid,
-                    uids=uid_tensor,
-                    weights=weight_tensor,
-                    wait_for_inclusion=True,
-                    wait_for_finalization=False,
-                )
-                success = result.success if hasattr(result, "success") else bool(result)
-                print(f"[chain] commit_weights: success={success} (reveal needed after tempo)")
-            else:
-                result = self.subtensor.set_weights(
-                    wallet=self.wallet,
-                    netuid=self.netuid,
-                    uids=uid_tensor,
-                    weights=weight_tensor,
-                    wait_for_inclusion=True,
-                    wait_for_finalization=False,
-                )
-                success = result.success if hasattr(result, "success") else bool(result)
-                print(f"[chain] set_weights: success={success}")
+            # v1.2: always call set_weights — the bittensor SDK handles
+            # commit-reveal internally when the subnet has it enabled, so the
+            # cr_enabled branch we used to have was broken (missing salt
+            # arg) and redundant. See deep_review_2026-05-31 #7.
+            result = self.subtensor.set_weights(
+                wallet=self.wallet,
+                netuid=self.netuid,
+                uids=uid_tensor,
+                weights=weight_tensor,
+                wait_for_inclusion=True,
+                wait_for_finalization=False,
+            )
+            success = result.success if hasattr(result, "success") else bool(result)
+            print(f"[chain] set_weights: success={success}")
 
             self.append_event({
-                "type": "weights_committed" if cr_enabled else "weights_set",
+                "type": "weights_set",
                 "timestamp": time.time(),
                 "uids": uids,
                 "weights": weights,
                 "success": success,
-                "commit_reveal": cr_enabled,
                 "block": self._current_block(),
             })
             return success
         except Exception as e:
-            print(f"[chain] weight setting failed: {e}")
-            return False
-
-    def reveal_weights(self) -> bool:
-        """Reveal previously committed weights (call after tempo passes)."""
-        try:
-            result = self.subtensor.reveal_weights(
-                wallet=self.wallet,
-                netuid=self.netuid,
-                wait_for_inclusion=True,
-            )
-            success = result.success if hasattr(result, "success") else bool(result)
-            print(f"[chain] reveal_weights: success={success}")
-            return success
-        except Exception as e:
-            print(f"[chain] reveal_weights failed: {e}")
+            print(f"[chain] weight setting failed: {type(e).__name__}: {e}")
             return False
 
     def get_king(self) -> Optional[KingRecord]:
@@ -260,6 +282,15 @@ class BittensorChain(ChainInterface):
         )
 
     def set_king(self, king: KingRecord) -> None:
+        """Persist the new king to off-chain state.
+
+        IMPORTANT (deep_review_2026-05-31 critical #13): this used to also call
+        self.set_weights({king: 1.0}) implicitly, which then collided with
+        the service's end-of-epoch set_weights(round_scores), tripping the
+        rate limit and silently dropping every meaningful_failure 0.1 credit.
+        The service is now the single authoritative writer of weights —
+        set_king ONLY updates off-chain metadata.
+        """
         d = {
             "miner_hotkey": king.miner_hotkey,
             "bundle_hash": king.bundle_hash,
@@ -273,14 +304,46 @@ class BittensorChain(ChainInterface):
             d["previous_king"] = king.previous_king
         (self.chain_dir / "king.json").write_text(json.dumps(d, indent=2, sort_keys=True))
 
-        # Also set weights: king gets weight 1.0, everyone else 0
-        self.set_weights({king.miner_hotkey: 1.0})
+    # ---- Audit / blacklist ----
+
+    def blacklist(self, hotkey: str, reason: str = "") -> None:
+        """Mark a miner hotkey as blacklisted. Subsequent set_weights calls
+        zero its weight regardless of round_scores.
+
+        Persisted to chain_dir/blacklist.json so the state survives validator
+        restarts. The §5.7 deterrence math requires real consequences for
+        audit failure — this is the consequence channel.
+        """
+        path = self.chain_dir / "blacklist.json"
+        current = {}
+        if path.exists():
+            try:
+                current = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                current = {}
+        current[hotkey] = {"reason": reason, "at": time.time(), "block": self._current_block()}
+        path.write_text(json.dumps(current, indent=2, sort_keys=True))
+        self.append_event({
+            "type": "blacklisted",
+            "timestamp": time.time(),
+            "miner_hotkey": hotkey,
+            "reason": reason,
+        })
+
+    def is_blacklisted(self, hotkey: str) -> bool:
+        path = self.chain_dir / "blacklist.json"
+        if not path.exists():
+            return False
+        try:
+            current = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return False
+        return hotkey in current
 
     def append_event(self, event: dict) -> None:
         if "block" not in event:
             event["block"] = self._current_block()
-        with (self.chain_dir / "events.jsonl").open("a") as f:
-            f.write(json.dumps(event) + "\n")
+        _locked_append(self.chain_dir / "events.jsonl", json.dumps(event) + "\n")
 
     def get_events(self, limit: int = 100) -> list[dict]:
         path = self.chain_dir / "events.jsonl"

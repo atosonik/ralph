@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from .interface import ChainInterface, HandshakeRecord, KingRecord
+from .bittensor_chain import _locked_append
 
 
 class LocalChain(ChainInterface):
@@ -37,8 +38,7 @@ class LocalChain(ChainInterface):
             "patch_hash": patch_hash,
             "nonce": nonce,
         }
-        with (self.chain_dir / "handshakes.jsonl").open("a") as f:
-            f.write(json.dumps(entry) + "\n")
+        _locked_append(self.chain_dir / "handshakes.jsonl", json.dumps(entry) + "\n")
         return nonce
 
     def lookup_handshake(self, nonce: str) -> Optional[HandshakeRecord]:
@@ -101,8 +101,28 @@ class LocalChain(ChainInterface):
         (self.chain_dir / "king.json").write_text(json.dumps(d, indent=2, sort_keys=True))
 
     def append_event(self, event: dict) -> None:
-        with (self.chain_dir / "events.jsonl").open("a") as f:
-            f.write(json.dumps(event) + "\n")
+        _locked_append(self.chain_dir / "events.jsonl", json.dumps(event) + "\n")
+
+    def blacklist(self, hotkey: str, reason: str = "") -> None:
+        path = self.chain_dir / "blacklist.json"
+        current = {}
+        if path.exists():
+            try:
+                current = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                current = {}
+        current[hotkey] = {"reason": reason, "at": time.time()}
+        path.write_text(json.dumps(current, indent=2, sort_keys=True))
+        self.append_event({"type": "blacklisted", "miner_hotkey": hotkey, "reason": reason, "timestamp": time.time()})
+
+    def is_blacklisted(self, hotkey: str) -> bool:
+        path = self.chain_dir / "blacklist.json"
+        if not path.exists():
+            return False
+        try:
+            return hotkey in json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return False
 
     def get_events(self, limit: int = 100) -> list[dict]:
         path = self.chain_dir / "events.jsonl"
