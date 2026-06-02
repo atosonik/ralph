@@ -320,6 +320,82 @@ def score_and_decide(
     }
 
 
+def _pending_weights_path(chain) -> Path | None:
+    """Return chain_dir/pending_weights.json or None if the chain has no dir."""
+    chain_dir = getattr(chain, "chain_dir", None)
+    if chain_dir is None:
+        return None
+    return Path(chain_dir) / "pending_weights.json"
+
+
+def _load_pending_weights(chain) -> dict[str, float]:
+    """Recover round_scores that were computed but never made it through
+    set_weights (e.g. rate-limited mid-epoch). Returns empty dict if none."""
+    p = _pending_weights_path(chain)
+    if p is None or not p.exists():
+        return {}
+    try:
+        return {k: float(v) for k, v in json.loads(p.read_text()).items()}
+    except (json.JSONDecodeError, ValueError):
+        return {}
+
+
+def _save_pending_weights(chain, weights: dict[str, float]) -> None:
+    p = _pending_weights_path(chain)
+    if p is None:
+        return
+    p.write_text(json.dumps(weights, indent=2, sort_keys=True))
+
+
+def _clear_pending_weights(chain) -> None:
+    p = _pending_weights_path(chain)
+    if p is not None and p.exists():
+        p.unlink()
+
+
+# §5.6: 10% of the per-epoch reward pool is allocated to meaningful_failure
+# miners (equal split — until we have a real informativeness ranker), with
+# the remaining 90% to the king. If there are zero meaningful_failures, the
+# whole 100% goes to the king.
+KING_POOL_FRACTION = 0.9
+MEANINGFUL_FAILURE_POOL_FRACTION = 0.1
+
+
+def _apply_pool_split(
+    chain,
+    king_change_hotkey: str | None,
+    meaningful_failure_hotkeys: list[str],
+) -> dict[str, float]:
+    """Compute the §5.6 90/10 pool split.
+
+    - If a new king was crowned this epoch, that miner gets the king share.
+      Otherwise the current sitting king gets the king share.
+    - Meaningful failures split the 10% pool equally.
+    - If no meaningful failures: king gets the full 100%.
+
+    Returns {hotkey: weight} ready to feed chain.set_weights.
+    """
+    weights: dict[str, float] = {}
+    king_hotkey = king_change_hotkey
+    if king_hotkey is None:
+        king = chain.get_king()
+        if king is not None:
+            king_hotkey = king.miner_hotkey
+    if not meaningful_failure_hotkeys:
+        if king_hotkey:
+            weights[king_hotkey] = 1.0
+        return weights
+    if king_hotkey:
+        weights[king_hotkey] = KING_POOL_FRACTION
+    per_mf = MEANINGFUL_FAILURE_POOL_FRACTION / len(meaningful_failure_hotkeys)
+    for hk in meaningful_failure_hotkeys:
+        # If a hotkey somehow appears as both king and meaningful_failure
+        # (e.g. king resubmitted a near-miss in the same epoch), max the
+        # two shares rather than overwrite.
+        weights[hk] = max(weights.get(hk, 0.0), per_mf)
+    return weights
+
+
 def run_epoch(
     chain,
     queue_dir: Path,
@@ -327,8 +403,24 @@ def run_epoch(
     hf_repo: str | None = None,
     hf_token: str | None = None,
     hf_limit: int = 10,
+    audit_random_rate: float = 0.10,
 ) -> dict:
-    """Process all pending submissions in one epoch."""
+    """Process all pending submissions in one epoch.
+
+    Weight allocation follows whitepaper §5.6:
+      - king (new or sitting) gets 90% of the pool when meaningful_failures
+        exist this epoch, 100% otherwise
+      - meaningful_failures split the 10% pool equally
+
+    Audit dispatcher: every accepted submission or close-margin king-change
+    is probabilistically enqueued for re-audit (validator.audit_scheduler).
+    Audit fails → chain.blacklist() the miner → next set_weights zeros them.
+
+    Round-scores are persisted to chain_dir/pending_weights.json before
+    chain.set_weights() so a rate-limited or crashed validator can recover
+    the weights on the next epoch without re-scoring the (now-archived)
+    bundles.
+    """
     if hf_repo:
         try:
             new = poll_hub(queue_dir, repo_id=hf_repo, token=hf_token, limit=hf_limit)
@@ -338,12 +430,29 @@ def run_epoch(
             log_warn(f"HF Hub poll failed: {e}")
 
     bundles = poll_queue(queue_dir)
-    if not bundles:
+    # Recovery: pick up any weights left over from a previous epoch that
+    # rate-limited or crashed before set_weights landed. They merge into the
+    # current round_scores additively (max-by-hotkey) so a king that won
+    # last epoch + got 0.1 meaningful_failure credit this epoch still gets
+    # the larger share.
+    recovered = _load_pending_weights(chain)
+    if recovered:
+        log_info(f"recovered {len(recovered)} pending weights from previous epoch")
+
+    if not bundles and not recovered:
         return {"submissions": 0, "accepted": 0, "rejected": 0}
 
     log_info(f"found {len(bundles)} pending submission(s)")
     epoch_results = {"submissions": len(bundles), "accepted": 0, "rejected": 0}
-    round_scores: dict[str, float] = {}
+
+    # Track classifications per-hotkey so the pool split at end of epoch is
+    # correct (and so two king_changes in one epoch — rare but legal —
+    # don't double-share the king pool).
+    king_change_hotkey: str | None = None
+    meaningful_failure_hotkeys: list[str] = []
+    # Audit dispatcher needs chain_dir to enqueue jobs. Both BittensorChain
+    # and LocalChain expose .chain_dir.
+    chain_dir = getattr(chain, "chain_dir", None)
 
     for bundle_dir in bundles:
         bundle_id = bundle_dir.name
@@ -378,8 +487,46 @@ def run_epoch(
             continue
 
         miner_hotkey = result["miner_hotkey"]
+        # Hotkey-registered gate: don't burn audit / king-update work on
+        # an unregistered hotkey. The chain.set_weights filter would zero
+        # them anyway, but rejecting here keeps the public corpus clean
+        # and stops the §5.7 audit dispatcher from wasting time.
+        if not chain.is_hotkey_registered(miner_hotkey):
+            log_warn(f"rejected {bundle_id}: miner hotkey {miner_hotkey[:16]}... not registered")
+            archive_bundle(bundle_dir, queue_dir, "rejected")
+            epoch_results["rejected"] += 1
+            chain.append_event({
+                "type": "submission_rejected",
+                "timestamp": time.time(),
+                "miner_hotkey": miner_hotkey,
+                "miner_github": result.get("miner_github", ""),
+                "reason": "hotkey_not_registered",
+            })
+            continue
+
+        # Defensive NaN/Inf check — score_bundle returns non-decisive on
+        # non-finite metrics but we also reject outright so the corpus
+        # doesn't end up with NaN val_bpb rows that break dashboards.
+        import math as _math
+        val_bpb = result.get("val_bpb")
+        bench_acc = result.get("benchmark_accuracy")
+        if (val_bpb is None or not _math.isfinite(val_bpb)
+                or bench_acc is None or not _math.isfinite(bench_acc)):
+            log_warn(f"rejected {bundle_id}: non-finite metrics (val_bpb={val_bpb}, bench={bench_acc})")
+            archive_bundle(bundle_dir, queue_dir, "rejected")
+            epoch_results["rejected"] += 1
+            chain.append_event({
+                "type": "submission_rejected",
+                "timestamp": time.time(),
+                "miner_hotkey": miner_hotkey,
+                "miner_github": result.get("miner_github", ""),
+                "reason": "non_finite_metrics",
+            })
+            continue
+
+        # weight_credit is informational here; the actual epoch weights come
+        # from _apply_pool_split() at end of epoch (§5.6 90/10 split).
         weight_credit = result.get("weight_credit", 0.0)
-        round_scores[miner_hotkey] = max(round_scores.get(miner_hotkey, 0), weight_credit)
 
         chain.append_event({
             "type": "submission_scored",
@@ -397,9 +544,7 @@ def run_epoch(
         })
 
         # Meaningful-failure branch: didn't crown a new king, but the work was
-        # informative. Give 10% weight credit and archive the rationale as a
-        # published negative result (HF push is a documented followup; for
-        # now, local archive to queue/meaningful_failure/<bundle_id>/).
+        # informative. Track for the 90/10 pool split; archive the bundle.
         if result["status"] == "meaningful_failure":
             gh = result.get("miner_github", "")
             who = f"{gh} ({miner_hotkey[:12]}...)" if gh else f"{miner_hotkey[:20]}..."
@@ -407,12 +552,14 @@ def run_epoch(
             king_bpb_str = f"{king_now.val_bpb:.4f}" if king_now else "—"
             log_info(
                 f"MEANINGFUL FAILURE: {who} val_bpb={result['val_bpb']:.4f} "
-                f"(king {king_bpb_str}); weight={MEANINGFUL_FAILURE_WEIGHT}, "
-                f"rationale archived to corpus"
+                f"(king {king_bpb_str}); rationale archived to corpus, "
+                f"will get equal share of 10% pool"
             )
             archive_bundle(bundle_dir, queue_dir, "meaningful_failure")
             epoch_results.setdefault("meaningful_failures", 0)
             epoch_results["meaningful_failures"] += 1
+            if miner_hotkey not in meaningful_failure_hotkeys:
+                meaningful_failure_hotkeys.append(miner_hotkey)
             chain.append_event({
                 "type": "meaningful_failure_archived",
                 "timestamp": time.time(),
@@ -421,6 +568,30 @@ def run_epoch(
                 "val_bpb": result["val_bpb"],
                 "bundle_hash": result["bundle_hash"],
             })
+            # Audit dispatcher: even close-margin meaningful_failures get a
+            # probabilistic re-audit (helps detect "I almost won" gaming).
+            if chain_dir is not None:
+                try:
+                    from validator.audit_scheduler import maybe_enqueue_audit
+                    archived_path = queue_dir / "meaningful_failure" / bundle_id
+                    job = maybe_enqueue_audit(
+                        chain_dir=Path(chain_dir),
+                        bundle_id=bundle_id,
+                        miner_hotkey=miner_hotkey,
+                        miner_github=result.get("miner_github", ""),
+                        bundle_hash=result["bundle_hash"],
+                        val_bpb=result["val_bpb"],
+                        king_val_bpb=king_now.val_bpb if king_now else None,
+                        quality_gain=result["quality_gain"],
+                        classification="meaningful_failure",
+                        proof_dir=archived_path,
+                        noise_floor_margin=noise_floor_margin,
+                        random_audit_rate=audit_random_rate,
+                    )
+                    if job is not None:
+                        log_info(f"  audit enqueued: reason={job.reason}")
+                except Exception as e:
+                    log_warn(f"audit enqueue failed for {bundle_id}: {e}")
             continue
 
         if result["accepted"]:
@@ -428,7 +599,7 @@ def run_epoch(
             who = f"{gh} ({miner_hotkey[:12]}...)" if gh else f"{miner_hotkey[:20]}..."
             log_info(f"NEW KING: {who} val_bpb={result['val_bpb']:.4f}")
             from chain_layer.interface import KingRecord
-            king = chain.get_king()
+            king_before = chain.get_king()
             new_king = KingRecord(
                 miner_hotkey=miner_hotkey,
                 bundle_hash=result["bundle_hash"],
@@ -436,13 +607,39 @@ def run_epoch(
                 benchmark_accuracy=result["benchmark_accuracy"],
                 compute_cost=result["score_report"].compute_cost,
                 crowned_at=time.time(),
-                proof_dir=str(bundle_dir),
+                # proof_dir is updated AFTER archive_bundle moves the
+                # bundle to scored/, so the king pointer survives the move.
+                proof_dir=str(queue_dir / "scored" / bundle_dir.name),
             )
-            if king:
+            if king_before:
                 import dataclasses
-                new_king.previous_king = dataclasses.asdict(king)
+                new_king.previous_king = dataclasses.asdict(king_before)
             chain.set_king(new_king)
             epoch_results["accepted"] += 1
+            king_change_hotkey = miner_hotkey
+            # Audit dispatcher: this king_change gets a probabilistic
+            # re-audit, always re-audited if margin was close to noise floor.
+            if chain_dir is not None:
+                try:
+                    from validator.audit_scheduler import maybe_enqueue_audit
+                    job = maybe_enqueue_audit(
+                        chain_dir=Path(chain_dir),
+                        bundle_id=bundle_id,
+                        miner_hotkey=miner_hotkey,
+                        miner_github=result.get("miner_github", ""),
+                        bundle_hash=result["bundle_hash"],
+                        val_bpb=result["val_bpb"],
+                        king_val_bpb=king_before.val_bpb if king_before else None,
+                        quality_gain=result["quality_gain"],
+                        classification="king_change",
+                        proof_dir=queue_dir / "scored" / bundle_id,
+                        noise_floor_margin=noise_floor_margin,
+                        random_audit_rate=audit_random_rate,
+                    )
+                    if job is not None:
+                        log_info(f"  audit enqueued: reason={job.reason}")
+                except Exception as e:
+                    log_warn(f"audit enqueue failed for {bundle_id}: {e}")
 
             # Auto-merge the winning PR + tag + release on karpaai/recipe.
             # Requires KARPA_BOT_GH_TOKEN. Failures here don't unwind the king
@@ -577,15 +774,28 @@ def run_epoch(
 
         archive_bundle(bundle_dir, queue_dir, "scored")
 
-    # Set weights for all scored miners this epoch
+    # §5.6 pool split: 90% king, 10% to meaningful_failures (equal split).
+    # If no meaningful_failures this epoch, king gets 100%.
+    round_scores = _apply_pool_split(chain, king_change_hotkey, meaningful_failure_hotkeys)
+
+    # Merge any weights recovered from a previous rate-limited epoch so we
+    # don't lose credit for a miner whose set_weights got dropped last time.
+    for hk, w in recovered.items():
+        round_scores[hk] = max(round_scores.get(hk, 0.0), w)
+
     if round_scores:
-        king = chain.get_king()
-        if king:
-            round_scores[king.miner_hotkey] = max(
-                round_scores.get(king.miner_hotkey, 0), 1.0
+        # Persist BEFORE attempting set_weights so a crash / rate-limit
+        # mid-flight doesn't lose this epoch's credits.
+        _save_pending_weights(chain, round_scores)
+        log_info(f"setting weights for {len(round_scores)} miners (split: king 90% / mf 10%)...")
+        ok = chain.set_weights(round_scores)
+        if ok:
+            _clear_pending_weights(chain)
+        else:
+            log_warn(
+                "set_weights returned False — pending_weights.json kept for "
+                "next-epoch retry. No credit was lost."
             )
-        log_info(f"setting weights for {len(round_scores)} miners...")
-        chain.set_weights(round_scores)
 
     return epoch_results
 
