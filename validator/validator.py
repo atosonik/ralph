@@ -169,17 +169,83 @@ def op1_diff_and_integrity(
     submission_payload: dict,
     proof_dir: Path,
 ) -> tuple[bool, str]:
-    """Verify the submission signature + bundle-hash integrity."""
-    # Verify miner signature.
+    """Verify miner signature + bundle integrity + restricted-file scan.
+
+    Whitepaper §5.4 Operation 1. Hardened per deep_review_2026-05-31:
+      #8  patch.diff is now integrity-checked vs manifest['patch_sha256'],
+          and bundle_hash is recomputed from disk and required to match
+          submission_payload['bundle_hash'] + manifest['bundle_hash'].
+      #9  if on-chain handshake is enforced, patch_hash from the chain
+          entry must equal manifest['patch_sha256'].
+      #12 the restricted-file scanner is now invoked on the validator
+          side (was previously only miner-side).
+    """
+    # Verify miner signature — hypothesis is part of the signed payload
+    # post-fix so miners can't replace a "we're investigating X" rationale
+    # with "we proved X" after the fact.
+    submission_hypothesis = submission_payload.get("hypothesis", "")
     ok = verify_signature(
         miner_hotkey=submission_payload["miner_hotkey"],
         bundle_hash=submission_payload["bundle_hash"],
         handshake_nonce=submission_payload["handshake_nonce"],
         signature_hex=submission_payload["signature_hex"],
         public_key_hex=submission_payload["public_key_hex"],
+        hypothesis=submission_hypothesis,
     )
     if not ok:
         return False, "submission signature invalid"
+
+    # Verify bundle manifest hashes match what's on disk.
+    manifest_path = proof_dir / "bundle_manifest.json"
+    if not manifest_path.exists():
+        return False, "missing bundle_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+
+    pairs = [
+        ("checkpoint", proof_dir / "training" / "checkpoint.pt", manifest.get("checkpoint_sha256")),
+        ("training_log", proof_dir / "training" / "training_log.jsonl", manifest.get("training_log_sha256")),
+        ("calibration", proof_dir / "calibration.json", manifest.get("calibration_sha256")),
+    ]
+    # Attestation is now required (single attested-execution tier).
+    if manifest.get("attestation_sha256"):
+        pairs.append(("attestation", proof_dir / "attestation.json", manifest["attestation_sha256"]))
+    # patch.diff: integrity-check whenever manifest declares a hash for it.
+    patch_path = proof_dir / "patch.diff"
+    patch_sha = manifest.get("patch_sha256")
+    if patch_sha:
+        pairs.append(("patch", patch_path, patch_sha))
+    for name, path, expected in pairs:
+        if expected is None:
+            return False, f"manifest missing {name} hash"
+        if not path.exists():
+            return False, f"missing artifact {name} at {path}"
+        actual = _file_sha256(path)
+        if actual != expected:
+            return False, f"{name} hash mismatch (expected {expected[:8]}, got {actual[:8]})"
+
+    # Recompute bundle_hash from disk and require it match BOTH the
+    # submission's signed-over hash AND the manifest's declared bundle hash.
+    # The recipe for bundle_hash is the same as in proof.runner.run_proof_test.
+    bundle_components: list[bytes] = []
+    if patch_path.exists():
+        bundle_components.append(_file_sha256(patch_path).encode())
+    else:
+        # Baseline bundles can ship without patch.diff (empty patch).
+        bundle_components.append(b"")
+    bundle_components.append(_file_sha256(proof_dir / "training" / "checkpoint.pt").encode())
+    bundle_components.append(_file_sha256(proof_dir / "training" / "training_log.jsonl").encode())
+    bundle_components.append(_file_sha256(proof_dir / "calibration.json").encode())
+    recomputed = hashlib.sha256(b"".join(bundle_components)).hexdigest()
+    if submission_payload.get("bundle_hash") != recomputed:
+        return False, (
+            f"bundle_hash mismatch: signed={submission_payload.get('bundle_hash','?')[:12]}, "
+            f"recomputed={recomputed[:12]}"
+        )
+    if manifest.get("bundle_hash") != recomputed:
+        return False, (
+            f"manifest bundle_hash mismatch: manifest={manifest.get('bundle_hash','?')[:12]}, "
+            f"recomputed={recomputed[:12]}"
+        )
 
     # Verify handshake nonce was committed on-chain. Until on-chain commits
     # work reliably for the test, the lookup may fail for legitimate cross-host
@@ -189,25 +255,30 @@ def op1_diff_and_integrity(
         chain_entry = lookup_handshake(karpa_root, submission_payload["handshake_nonce"])
         if chain_entry is None:
             return False, "handshake nonce not found on chain"
-        if chain_entry["miner_hotkey"] != submission_payload["miner_hotkey"]:
+        if chain_entry.get("miner_hotkey") != submission_payload["miner_hotkey"]:
             return False, "handshake nonce was committed by a different miner"
+        # #9: cross-check that the patch the miner committed on-chain matches
+        # the patch in the bundle. Without this, a miner can commit "look
+        # I'm running patch X" and ship a bundle for entirely different patch Y.
+        chain_patch_hash = chain_entry.get("patch_hash")
+        if chain_patch_hash and patch_sha and chain_patch_hash != patch_sha:
+            return False, (
+                f"on-chain patch_hash mismatch: chain={chain_patch_hash[:12]}, "
+                f"bundle={patch_sha[:12]}"
+            )
 
-    # Verify bundle manifest hashes match what's on disk.
-    manifest = json.loads((proof_dir / "bundle_manifest.json").read_text())
-    pairs = [
-        ("checkpoint", proof_dir / "training" / "checkpoint.pt", manifest["checkpoint_sha256"]),
-        ("training_log", proof_dir / "training" / "training_log.jsonl", manifest["training_log_sha256"]),
-        ("calibration", proof_dir / "calibration.json", manifest["calibration_sha256"]),
-    ]
-    # Attestation is optional (unverified tier has no attestation.json).
-    if manifest.get("attestation_sha256"):
-        pairs.append(("attestation", proof_dir / "attestation.json", manifest["attestation_sha256"]))
-    for name, path, expected in pairs:
-        if not path.exists():
-            return False, f"missing artifact {name} at {path}"
-        actual = _file_sha256(path)
-        if actual != expected:
-            return False, f"{name} hash mismatch (expected {expected[:8]}, got {actual[:8]})"
+    # #12: restricted-file scanner now runs on the validator side. The
+    # miner-side scan in proof.runner was bypassable by a miner who skipped
+    # invoking the runner.
+    if patch_path.exists():
+        patch_text = patch_path.read_text(encoding="utf-8", errors="replace")
+        restricted_yaml = karpa_root / "restricted_files.yaml"
+        if restricted_yaml.exists():
+            patterns = _load_restricted_paths(restricted_yaml)
+            violations = scan_diff_for_restricted(patch_text, patterns)
+            if violations:
+                return False, f"patch touches restricted paths: {violations}"
+
     return True, "ok"
 
 

@@ -147,28 +147,98 @@ def _load_restricted_paths(restricted_yaml: Path) -> list[str]:
 
 def _path_matches(pattern: str, path: str) -> bool:
     """Glob-style match supporting prefix/**."""
+    import os.path
+    # Normalize the path: collapse ./, .., duplicate slashes. POSIX style.
+    path = os.path.normpath(path).replace("\\", "/")
+    if path.startswith("./"):
+        path = path[2:]
     if pattern.endswith("/**"):
-        prefix = pattern[:-3]
-        return path == prefix.rstrip("/") or path.startswith(prefix)
+        prefix = pattern[:-3].rstrip("/")
+        return path == prefix or path.startswith(prefix + "/")
     return path == pattern
 
 
-def scan_diff_for_restricted(patch_text: str, restricted_patterns: list[str]) -> list[str]:
-    """Return restricted paths the patch touches. Empty list = clean."""
-    violations: list[str] = []
+def _extract_diff_paths(patch_text: str) -> list[str]:
+    """Extract every file path a unified diff touches.
+
+    Handles:
+      - `--- a/path` / `+++ b/path` headers (the common case)
+      - Tab-suffixed paths: `--- a/path\t2024-01-01...`
+      - Git extended headers: `diff --git a/foo b/bar`, `rename from`,
+        `rename to`, `copy from`, `copy to`
+      - `Index: path` and `Only in:` markers (rare but possible)
+      - /dev/null sentinels (file create/delete) — ignored
+
+    Deduplicated, POSIX-normalized.
+    """
+    paths: list[str] = []
+
+    def _add(raw: str) -> None:
+        raw = raw.strip()
+        if not raw or raw == "/dev/null":
+            return
+        # Strip tab-suffix timestamps from GNU diff output
+        if "\t" in raw:
+            raw = raw.split("\t", 1)[0].strip()
+        # Strip leading quotes from `diff --git "a/file with spaces" "b/..."`
+        if raw.startswith('"') and raw.endswith('"'):
+            raw = raw[1:-1]
+        # Strip leading a/ or b/ prefix (standard git)
+        for prefix in ("a/", "b/", "c/"):
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):]
+                break
+        # Normalize relative components, collapse backslashes
+        import os.path
+        norm = os.path.normpath(raw).replace("\\", "/")
+        if norm.startswith("./"):
+            norm = norm[2:]
+        if norm and norm not in paths:
+            paths.append(norm)
+
     for line in patch_text.splitlines():
-        # unified diff: lines starting with `+++ ` or `--- ` carry file paths
         if line.startswith(("+++ ", "--- ")):
-            rest = line[4:].strip()
-            if rest in ("/dev/null",):
-                continue
-            # strip leading "a/" or "b/" if present
-            for prefix in ("a/", "b/"):
-                if rest.startswith(prefix):
-                    rest = rest[len(prefix):]
-            for pat in restricted_patterns:
-                if _path_matches(pat, rest) and rest not in violations:
-                    violations.append(rest)
+            _add(line[4:])
+        elif line.startswith("diff --git "):
+            # `diff --git a/foo b/bar` — extract both file names
+            rest = line[len("diff --git "):]
+            # Handle quoted paths with spaces
+            if rest.startswith('"'):
+                # Find the closing quote
+                end_first = rest.find('" "', 1)
+                if end_first > 0:
+                    _add(rest[1:end_first])
+                    _add(rest[end_first + 3:].rstrip('"'))
+                    continue
+            # Split on first space group
+            parts = rest.split()
+            if len(parts) >= 2:
+                _add(parts[0])
+                _add(parts[1])
+        elif line.startswith(("rename from ", "rename to ", "copy from ", "copy to ")):
+            _add(line.split(" ", 2)[2])
+        elif line.startswith("Index: "):
+            _add(line[7:])
+    return paths
+
+
+def scan_diff_for_restricted(patch_text: str, restricted_patterns: list[str]) -> list[str]:
+    """Return restricted paths the patch touches. Empty list = clean.
+
+    Hardened against scanner bypasses (deep_review_2026-05-31 high #1):
+      - Tab-suffixed paths (`--- a/file\t2024-...`)
+      - Rename/copy headers (`rename from`, `rename to`, `copy from`,
+        `copy to`)
+      - `diff --git` lines (capture both source + destination)
+      - Path traversal via `..` (normalized away)
+      - Backslash path separators (normalized to forward slash)
+    """
+    violations: list[str] = []
+    for path in _extract_diff_paths(patch_text):
+        for pat in restricted_patterns:
+            if _path_matches(pat, path) and path not in violations:
+                violations.append(path)
+                break
     return violations
 
 

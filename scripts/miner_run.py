@@ -215,7 +215,9 @@ def run_miner(
 
     # ---- 4. Sign submission ------------------------------------------------
     print(f"\n[3/6] signing submission...")
-    sig = sign_submission(KARPA_ROOT, miner_hotkey, bundle.bundle_hash, nonce)
+    # Sign over bundle_hash + nonce + hotkey + hypothesis-hash. Hypothesis
+    # is folded in so the miner can't swap the rationale post-merge.
+    sig = sign_submission(KARPA_ROOT, miner_hotkey, bundle.bundle_hash, nonce, hypothesis=rationale_summary)
     print(f"      signed by {sig['public_key_hex'][:24]}...")
 
     # ---- 5. Open PR against karpaai/recipe (before HF upload so it ends up

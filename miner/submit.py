@@ -139,18 +139,45 @@ def _ensure_keypair(karpa_root: Path, miner_hotkey: str) -> tuple[bytes, bytes]:
     return sk_path.read_bytes(), pk_path.read_bytes()
 
 
+def _signed_payload(
+    miner_hotkey: str,
+    handshake_nonce: str,
+    bundle_hash: str,
+    hypothesis: str = "",
+) -> bytes:
+    """Canonical signed payload. Includes the hypothesis hash so the miner
+    can't swap their pre-submission claim for a different one post-merge.
+
+    Backward compatibility: if hypothesis is empty, the payload matches the
+    pre-fix encoding so older signatures still verify.
+    """
+    base = f"{miner_hotkey}|{handshake_nonce}|{bundle_hash}"
+    if hypothesis:
+        import hashlib as _h
+        hyp_hash = _h.sha256(hypothesis.encode("utf-8")).hexdigest()
+        base += f"|{hyp_hash}"
+    return base.encode("utf-8")
+
+
 def sign_submission(
     karpa_root: Path,
     miner_hotkey: str,
     bundle_hash: str,
     handshake_nonce: str,
+    hypothesis: str = "",
 ) -> dict:
-    """Returns {signature_hex, public_key_hex}."""
+    """Returns {signature_hex, public_key_hex}.
+
+    Hypothesis is folded into the signed payload via its sha256 hash so the
+    signature commits the miner to the exact text they submitted. The full
+    hypothesis still rides on submission.json; the hash binding prevents
+    post-merge edits.
+    """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     sk_bytes, pk_bytes = _ensure_keypair(karpa_root, miner_hotkey)
     sk = Ed25519PrivateKey.from_private_bytes(sk_bytes)
-    payload = f"{miner_hotkey}|{handshake_nonce}|{bundle_hash}".encode("utf-8")
+    payload = _signed_payload(miner_hotkey, handshake_nonce, bundle_hash, hypothesis)
     sig = sk.sign(payload)
     return {
         "signature_hex": sig.hex(),
@@ -164,14 +191,23 @@ def verify_signature(
     handshake_nonce: str,
     signature_hex: str,
     public_key_hex: str,
+    hypothesis: str = "",
 ) -> bool:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
     try:
         pk = Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex))
-        payload = f"{miner_hotkey}|{handshake_nonce}|{bundle_hash}".encode("utf-8")
-        pk.verify(bytes.fromhex(signature_hex), payload)
-        return True
+        # Try the hypothesis-included variant first; fall back to the
+        # pre-fix (empty-hypothesis) form for backward compatibility with
+        # signatures generated before this change.
+        for hyp_variant in (hypothesis, "") if hypothesis else ("",):
+            payload = _signed_payload(miner_hotkey, handshake_nonce, bundle_hash, hyp_variant)
+            try:
+                pk.verify(bytes.fromhex(signature_hex), payload)
+                return True
+            except Exception:
+                continue
+        return False
     except Exception:
         return False
 
