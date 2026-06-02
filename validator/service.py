@@ -265,7 +265,10 @@ def score_and_decide(
     king = chain.get_king()
     king_bpb = king.val_bpb if king else None
     king_bench = king.benchmark_accuracy if king else None
-    tier = result.operations.get("op2_attestation", {}).get("tier", "unverified")
+    # v1.2: single attested-execution tier. op2 either passed (tier="verified")
+    # or rejected the submission outright. Treat the field defensively for any
+    # legacy bundle that slips through.
+    tier = result.operations.get("op2_attestation", {}).get("tier", "verified")
 
     score = score_bundle(
         val_bpb=result.hidden_eval.val_bpb,

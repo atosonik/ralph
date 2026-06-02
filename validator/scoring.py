@@ -2,11 +2,10 @@
 Scoring — the `score = quality + benchmark + stability - cost - complexity -
 regression` formula from whitepaper §5.5.
 
-The compute-cost denominator carries a credibility factor α from the two-tier
-model (§5.4): α = 1.0 for verified (hardware-attested), α = 0.5 for
-unverified (any GPU). Effective cost = claimed_cost / α, so unverified
-submissions pay a 2× cost penalty — making the lie-about-hardware attack
-unprofitable (calibrated against the H100/4090 price ratio).
+v1.2 §5.4: single attested-execution tier. The two-tier credibility factor
+(α = 1.0 verified / α = 0.5 unverified) is RETIRED. Every miner runs the
+official Karpa container inside CC; anything without a valid attestation
+chain is rejected at op2. No discount factor on the cost denominator.
 
 For Phase 0 we keep it minimal and tunable: only quality and cost terms are
 implemented; stability, complexity, regression are zero placeholders with
@@ -15,11 +14,13 @@ hooks so we can wire them in once we have multi-seed runs.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
+# Kept for back-compat with any external caller that still imports it; v1.2
+# code never multiplies by it (single attested-execution tier).
 ALPHA_VERIFIED = 1.0
-ALPHA_UNVERIFIED = 0.5
 
 
 @dataclass
@@ -31,7 +32,6 @@ class ScoreReport:
     compute_cost: float
     compute_cost_effective: float
     tier: str
-    alpha: float
     score: float
     king_val_bpb: float | None
     king_benchmark: float | None
@@ -66,7 +66,7 @@ def score_bundle(
     noise_floor_margin: float,
     matmul_ms: float,
     wall_clock_s: float,
-    tier: str = "unverified",
+    tier: str = "verified",
     bpb_weight: float = 1.0,
     benchmark_weight: float = 1.0,
     cost_weight: float = 0.1,
@@ -76,14 +76,20 @@ def score_bundle(
     val_bpb is better. Benchmark gain is (challenger - king) since higher
     accuracy is better.
 
-    Compute cost = claimed_cost / α where α = 1.0 (verified) or 0.5
-    (unverified). The effective cost for unverified is 2× claimed, so the
-    per-compute-dollar score is halved — making it unprofitable to lie about
-    hardware (§5.4).
-    """
-    alpha = ALPHA_VERIFIED if tier == "verified" else ALPHA_UNVERIFIED
+    v1.2 §5.4: single attested-execution tier. No α discount on the cost
+    denominator — verification is binary, enforced at op2.
 
-    if king_val_bpb is None:
+    NaN/Inf-safe (deep_review_2026-05-31 high #3): if val_bpb or
+    benchmark_accuracy is non-finite the ScoreReport is returned with
+    decisively_beats_king=False and quality_gain/benchmark_gain zero so the
+    caller can reject without crowning a null king.
+    """
+    finite_metrics = (
+        isinstance(val_bpb, (int, float)) and math.isfinite(val_bpb)
+        and isinstance(benchmark_accuracy, (int, float)) and math.isfinite(benchmark_accuracy)
+    )
+
+    if not finite_metrics or king_val_bpb is None:
         quality_gain = 0.0
         benchmark_gain = 0.0
         decisively = False
@@ -97,7 +103,8 @@ def score_bundle(
         )
 
     cost_h100h = _hours_to_normalized_h100(matmul_ms, wall_clock_s)
-    cost_effective = cost_h100h / alpha
+    # v1.2: no α factor.
+    cost_effective = cost_h100h
 
     score = (
         bpb_weight * quality_gain
@@ -112,8 +119,7 @@ def score_bundle(
         benchmark_gain=benchmark_gain,
         compute_cost=cost_h100h,
         compute_cost_effective=cost_effective,
-        tier=tier,
-        alpha=alpha,
+        tier="verified",  # v1.2 single tier
         score=score,
         king_val_bpb=king_val_bpb,
         king_benchmark=king_benchmark,

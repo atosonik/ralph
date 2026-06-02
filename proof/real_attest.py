@@ -329,50 +329,95 @@ def generate_attestation(
 def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
     """Verify an NVIDIA GPU attestation JWT token.
 
-    In production, this verifies the JWT signature against NVIDIA's root
-    certificates and checks the nonce claim matches. For now we accept
-    any non-empty token from the SDK as valid (the SDK itself verified
-    against NRAS during generation).
+    Fail-closed implementation (deep_review_2026-05-31 #3): the previous
+    code returned True for any non-empty string when PyJWT was missing, and
+    when PyJWT was present it decoded with options={"verify_signature": False}
+    — i.e. accepted any token whose nonce claim happened to match. Either is
+    a free verified-tier pass for anyone with a JSON editor.
+
+    Until the NRAS JWKS verification is wired (TODO: real_nvcc_only on real
+    H100-CC silicon), this function REFUSES verified-tier attestation. To
+    allow a loud-warning mock-style acceptance on testnet, set the env var
+    KARPA_ALLOW_REAL_ATTEST_STUB=1 — but never set this on mainnet.
     """
+    import os as _os
     if not token:
         return False, "empty GPU token"
-    try:
-        import jwt
-        # NVIDIA NRAS tokens are JWTs signed with RS256.
-        # In production: verify against NVIDIA's JWKS endpoint.
-        # For Phase 0.5c: decode without verification to check claims.
-        claims = jwt.decode(token, options={"verify_signature": False})
-        token_nonce = claims.get("nonce", claims.get("eat_nonce", ""))
-        if expected_nonce and token_nonce != expected_nonce:
-            return False, f"nonce mismatch in GPU token (expected {expected_nonce[:16]}, got {token_nonce[:16]})"
-        return True, "GPU token valid"
-    except ImportError:
-        # No JWT library — accept the token's existence as sufficient for now.
-        return True, "GPU token present (JWT verification skipped — install PyJWT)"
-    except Exception as e:
-        return False, f"GPU token verification failed: {e}"
+    if _os.environ.get("KARPA_ALLOW_REAL_ATTEST_STUB") == "1":
+        # Loud-warning stub for testnet only. The NRAS signature is not
+        # verified; the nonce binding is best-effort.
+        import sys as _sys
+        print(
+            "[attest] WARNING: KARPA_ALLOW_REAL_ATTEST_STUB=1 — accepting "
+            "real_* attestation without NRAS JWKS signature verification. "
+            "MUST NOT BE SET ON MAINNET.",
+            file=_sys.stderr,
+        )
+        try:
+            import jwt
+            claims = jwt.decode(token, options={"verify_signature": False})
+            token_nonce = claims.get("nonce", claims.get("eat_nonce", ""))
+            if expected_nonce and token_nonce != expected_nonce:
+                return False, (
+                    f"nonce mismatch in GPU token (expected {expected_nonce[:16]}, "
+                    f"got {token_nonce[:16]})"
+                )
+            return True, "GPU token accepted (stub: signature unchecked)"
+        except ImportError:
+            return False, (
+                "PyJWT not installed; cannot even nonce-check the GPU token. "
+                "Install PyJWT or wire real NRAS JWKS verification."
+            )
+        except Exception as e:
+            return False, f"GPU token decode failed: {e}"
+
+    # Production path: we don't have NRAS JWKS verification wired yet.
+    # Fail-closed. Wire jwt verification against NVIDIA's published JWKS
+    # before flipping this to a verified result.
+    return False, (
+        "GPU token signature verification not implemented. "
+        "Wire NRAS JWKS verification before accepting real_nvcc_only "
+        "attestation, or set KARPA_ALLOW_REAL_ATTEST_STUB=1 (testnet only)."
+    )
 
 
 def verify_tdx_quote(quote_hex: str, expected_nonce: str, expected_measurement: str) -> tuple[bool, str]:
     """Verify an Intel TDX quote.
 
-    In production, this checks:
-      1. Quote signature chains to Intel's root
-      2. RTMR values match expected container measurement
-      3. Report data includes the expected nonce
+    Fail-closed implementation (deep_review_2026-05-31 #3): the previous
+    code only checked len(quote) >= 256, never verified the Intel signature
+    chain, never checked RTMRs against expected_measurement, never checked
+    report_data == sha256(nonce || user_data). Any 256-byte blob passed.
 
-    For Phase 0.5c: we check the quote is non-empty and well-formed.
-    Full verification requires Intel Trust Authority or local verification libs.
+    Until libtdx-attest / trustauthority-py is wired in, this function
+    REFUSES TDX quote acceptance. Set KARPA_ALLOW_REAL_ATTEST_STUB=1 to
+    re-enable the loose check on testnet only.
     """
+    import os as _os
     if not quote_hex:
         return False, "empty TDX quote"
-    try:
-        quote_bytes = bytes.fromhex(quote_hex)
+    if _os.environ.get("KARPA_ALLOW_REAL_ATTEST_STUB") == "1":
+        import sys as _sys
+        print(
+            "[attest] WARNING: KARPA_ALLOW_REAL_ATTEST_STUB=1 — accepting "
+            "TDX quote without Intel signature chain verification. "
+            "MUST NOT BE SET ON MAINNET.",
+            file=_sys.stderr,
+        )
+        try:
+            quote_bytes = bytes.fromhex(quote_hex)
+        except ValueError as e:
+            return False, f"TDX quote hex decode failed: {e}"
         if len(quote_bytes) < 256:
             return False, f"TDX quote too short ({len(quote_bytes)} bytes)"
-        return True, f"TDX quote present ({len(quote_bytes)} bytes, full verification requires Intel TA)"
-    except Exception as e:
-        return False, f"TDX quote verification failed: {e}"
+        return True, f"TDX quote accepted (stub: signature/RTMR/report_data unchecked, {len(quote_bytes)} bytes)"
+
+    return False, (
+        "TDX quote verification not implemented. Wire libtdx-attest or "
+        "trustauthority-py to check Intel signature chain, RTMRs against "
+        "expected_measurement, and report_data == sha256(nonce||user_data). "
+        "Or set KARPA_ALLOW_REAL_ATTEST_STUB=1 (testnet only)."
+    )
 
 
 def verify_attestation(

@@ -218,34 +218,70 @@ def op2_attestation_verify(
 ) -> tuple[bool, str, str]:
     """Verify attestation. Returns (ok, detail, tier).
 
-    Implements the v1.1 two-tier model:
-      - If attestation.json is present and valid → tier = "verified"
-      - If attestation.json is absent → tier = "unverified" (NOT rejected)
-      - If attestation.json is present but INVALID → rejected (moral hazard:
-        a failed verified claim is not silently downgraded to unverified)
-    Whitepaper v1.2 §5.4 retires this in favour of a single attested-execution
-    tier — code rewrite pending; see docs/whitepaper_v1.2_updates.md §B.2.
+    Whitepaper v1.2 §5.4 — single attested-execution tier. There is no
+    "unverified" path; a submission without a valid attestation chain is
+    REJECTED outright.
+
+    On mainnet (KARPA_ALLOW_MOCK_ATTESTATION unset or != "1") only real_*
+    attestation types are accepted. Mock attestations exist in the repo as
+    open-source code so anyone can forge them — they are explicitly rejected
+    on mainnet. Testnet operators can set KARPA_ALLOW_MOCK_ATTESTATION=1 to
+    accept mocks (with a loud warning).
+
+    See deep_review_2026-05-31 critical #3/#4/#5.
     """
+    import os as _os
+
     att_path = proof_dir / "attestation.json"
     if not att_path.exists():
-        return True, "no attestation — scoring as unverified (α=0.5)", "unverified"
+        # Whitepaper v1.2: no attestation = rejection. The legacy
+        # "unverified tier α=0.5" path is retired.
+        return False, "missing attestation.json — single attested-execution tier required (v1.2 §5.4)", "rejected"
 
     att_text = att_path.read_text()
     att_data = json.loads(att_text)
-    expected_measurement = compute_container_measurement(_list_proof_sources(karpa_root))
+    from karpa_bootstrap import RECIPE_DIR
+    expected_measurement = compute_container_measurement(karpa_root, recipe_dir=RECIPE_DIR)
+
+    allow_mock = _os.environ.get("KARPA_ALLOW_MOCK_ATTESTATION") == "1"
 
     # Auto-detect attestation format: real (has attestation_type field) vs legacy mock
     if "attestation_type" in att_data:
         att = RealAttestation.from_json(att_text)
+        att_type_label = att.attestation_type
+        is_real = att_type_label.startswith("real_")
+        if not is_real and not allow_mock:
+            return False, (
+                f"attestation_type={att_type_label!r} is not real_*; mock "
+                "attestations rejected on mainnet (set KARPA_ALLOW_MOCK_ATTESTATION=1 "
+                "for testnet)"
+            ), "rejected"
+        if not is_real and allow_mock:
+            import sys as _sys
+            print(
+                "[attest] WARNING: KARPA_ALLOW_MOCK_ATTESTATION=1 — accepting "
+                f"mock attestation_type={att_type_label!r}. MUST NOT BE SET ON MAINNET.",
+                file=_sys.stderr,
+            )
         ok, errors = verify_real_attestation(
             att,
             expected_container_measurement=expected_measurement,
             expected_handshake_nonce=submission_payload["handshake_nonce"],
             expected_bundle_hash=submission_payload["bundle_hash"],
         )
-        att_type_label = att.attestation_type
-        is_real = att_type_label.startswith("real_")
     else:
+        # Legacy mock format (no attestation_type field).
+        if not allow_mock:
+            return False, (
+                "legacy mock attestation rejected on mainnet "
+                "(set KARPA_ALLOW_MOCK_ATTESTATION=1 for testnet)"
+            ), "rejected"
+        import sys as _sys
+        print(
+            "[attest] WARNING: KARPA_ALLOW_MOCK_ATTESTATION=1 — accepting "
+            "legacy mock attestation. MUST NOT BE SET ON MAINNET.",
+            file=_sys.stderr,
+        )
         att = MockAttestation.from_json(att_text)
         ok, errors = verify_mock_attestation(
             att,
@@ -257,11 +293,11 @@ def op2_attestation_verify(
         is_real = False
 
     if not ok:
-        return False, f"verified-tier claim failed ({att_type_label}): " + "; ".join(errors), "rejected"
+        return False, f"attestation verification failed ({att_type_label}): " + "; ".join(errors), "rejected"
 
-    tier = "verified" if is_real else "verified"  # mock attestation also counts as verified in Phase 0
-    detail = f"attestation verified ({att_type_label}) — scoring as verified (α=1.0)"
-    return True, detail, tier
+    # v1.2: single attested-execution tier. No α discount.
+    detail = f"attestation verified ({att_type_label})"
+    return True, detail, "verified"
 
 
 def op3_log_plausibility(proof_dir: Path) -> tuple[bool, str]:
