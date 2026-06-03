@@ -107,3 +107,6 @@ TODO.local.md
 
 # Twitter post drafts — local only, never committed
 twitter_posts/
+
+# Per-agent state (memory, prompts, runs, lockfiles) — never tracked
+agents/

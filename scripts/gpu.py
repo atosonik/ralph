@@ -32,6 +32,32 @@ from typing import Optional
 import urllib.request
 import urllib.error
 
+
+def _sweep_orphans_safe() -> None:
+    """Best-effort orphan sweep — never raises. Called at the top of every
+    gpu.py command so a crashed previous session doesn't leak GPU billing.
+    Costs an API call or two; cheap when there are no orphans."""
+    try:
+        from scripts.orphan_gpu_sweep import sweep
+    except Exception:
+        # Direct invocation (PYTHONPATH may not include scripts/)
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "orphan_gpu_sweep",
+                str(__import__("pathlib").Path(__file__).resolve().parent / "orphan_gpu_sweep.py"),
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            sweep = mod.sweep
+        except Exception:
+            return
+    try:
+        sweep(quiet=True)
+    except Exception as e:
+        print(f"[gpu] orphan sweep failed (non-fatal): {e}", flush=True)
+
+
 API_BASE = "https://api.shadeform.ai/v1"
 KEY_FILE = Path("/root/.shadeform_api_key")
 SSH_KEY = Path("/root/.ssh/id_bitzic")
@@ -101,6 +127,7 @@ def cmd_list_types(args):
 
 def cmd_rent(args):
     """Rent the cheapest available H100."""
+    _sweep_orphans_safe()
     name = getattr(args, "name", "default")
     existing = _load_instance(name)
     if existing and existing.get("status") not in ("deleted", "error", None):
@@ -154,6 +181,8 @@ def cmd_rent(args):
     instance_id = resp.get("id")
     print(f"Instance created: {instance_id}")
 
+    max_hours = float(getattr(args, "max_hours", 2.5))
+    now_ts = time.time()
     instance_data = {
         "id": instance_id,
         "name": name,
@@ -161,10 +190,13 @@ def cmd_rent(args):
         "region": region,
         "type": shade_type,
         "price_per_hour": price,
-        "created_at": time.time(),
+        "created_at": now_ts,
+        "kill_at": now_ts + max_hours * 3600,
+        "max_hours": max_hours,
         "status": "pending",
     }
     _save_instance(instance_data, name)
+    print(f"  kill_at: +{max_hours:.1f}h (safety: orphan sweep tears down after this)")
 
     print("Waiting for instance to be ready...")
     for i in range(60):
@@ -296,6 +328,11 @@ def main():
     rent_p.add_argument("--cloud", default=None, help="Cloud provider (default: hyperstack)")
     rent_p.add_argument("--region", default=None, help="Region (default: auto-pick cheapest)")
     rent_p.add_argument("--name", default="default", help="Logical instance name (state file suffix)")
+    rent_p.add_argument(
+        "--max-hours", type=float, default=2.5,
+        help="Hard kill timer: instance auto-swept after this many hours from rent "
+             "(default: 2.5). Defense against orchestrator crash leaking GPU billing.",
+    )
     status_p = sub.add_parser("status", help="Show instance status")
     status_p.add_argument("--name", default="default")
 
@@ -311,6 +348,9 @@ def main():
     del_p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
 
     args = p.parse_args()
+    # Sweep is cheap when clean — defends against a crashed prior session
+    # leaving an H100 billing in the background. Runs once per command.
+    _sweep_orphans_safe()
     cmds = {
         "list-types": cmd_list_types,
         "rent": cmd_rent,

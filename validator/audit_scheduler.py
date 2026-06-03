@@ -29,8 +29,26 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _default_random_audit_rate() -> float:
+    """Operator override via KARPA_AUDIT_RATE env var (0.0–1.0). Lets the
+    operator drop the audit rate without code change — useful when running
+    self-audits where audits cost without revealing fraud (no external miners
+    to defend against)."""
+    import os as _os
+    raw = _os.environ.get("KARPA_AUDIT_RATE")
+    if raw is None:
+        return 0.10
+    try:
+        v = float(raw)
+        if 0.0 <= v <= 1.0:
+            return v
+    except ValueError:
+        pass
+    return 0.10
+
+
 # Tunable: probability that any accepted king-change is audited blindly.
-DEFAULT_RANDOM_AUDIT_RATE = 0.10
+DEFAULT_RANDOM_AUDIT_RATE = _default_random_audit_rate()
 # Tunable: if a submission beats king by less than this fraction of the noise
 # floor, audit regardless of the random sample. Close margins are the highest
 # fraud-vs-luck-distinguishing signal.
