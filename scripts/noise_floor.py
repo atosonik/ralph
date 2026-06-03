@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import secrets
 import shutil
 import statistics
@@ -30,10 +29,10 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
-
-from eval import run_hidden_eval
 from model import KarpaBase, KarpaConfig
+
+import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
+from eval import run_hidden_eval
 from proof.runner import run_proof_test
 
 

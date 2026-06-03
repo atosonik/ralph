@@ -13,7 +13,6 @@ processed bundles after restarts.
 from __future__ import annotations
 
 import json
-import logging
 import os
 import shutil
 from pathlib import Path
@@ -141,7 +140,10 @@ def download_one(
 
     # Annotate which PR this came from so the validator can merge later.
     if pr_num is not None:
-        (out / ".hf_pr.json").write_text(json.dumps({"pr_num": pr_num, "git_ref": git_ref, "repo_id": "karpaai/proof-bundles"}, indent=2))
+        (out / ".hf_pr.json").write_text(json.dumps(
+            {"pr_num": pr_num, "git_ref": git_ref, "repo_id": "karpaai/proof-bundles"},
+            indent=2,
+        ))
     return True
 
 

@@ -17,7 +17,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-
 # Kept for back-compat with any external caller that still imports it; v1.2
 # code never multiplies by it (single attested-execution tier).
 ALPHA_VERIFIED = 1.0

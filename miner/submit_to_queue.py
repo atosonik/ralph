@@ -13,7 +13,8 @@ Usage:
     # 1. Run proof test
     python -m proof.runner --submission submissions/my_patch --out-dir runs/my_proof --tier unverified
     # 2. Assemble + sign
-    python -m miner.submit assemble --miner-hotkey <hotkey> --submission-dir submissions/my_patch --proof-dir runs/my_proof
+    python -m miner.submit assemble --miner-hotkey <hotkey> \
+        --submission-dir submissions/my_patch --proof-dir runs/my_proof
     # 3. Submit to validator queue
     python -m miner.submit_to_queue --proof-dir runs/my_proof --queue-dir queue/
 """
@@ -62,7 +63,7 @@ def submit_to_queue(proof_dir: Path, queue_dir: Path) -> Path:
         shutil.copytree(training_dir, dest / "training")
 
     submission = json.loads(submission_path.read_text())
-    print(f"Submitted to queue:")
+    print("Submitted to queue:")
     print(f"  bundle_id: {bundle_id}")
     print(f"  miner:     {submission.get('miner_hotkey', '?')[:20]}...")
     print(f"  queue:     {dest}")

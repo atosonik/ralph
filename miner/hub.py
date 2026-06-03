@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 
@@ -61,7 +60,7 @@ def upload_bundle(
     against the bundle's diff (without it the verifier silently skips
     the check and treats the bundle as a baseline).
     """
-    from huggingface_hub import HfApi, CommitOperationAdd
+    from huggingface_hub import CommitOperationAdd, HfApi
 
     api = HfApi(token=token)
 

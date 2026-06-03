@@ -22,8 +22,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from validator.scoring import ScoreReport, score_bundle
-from validator.validator import judge_submission, ValidatorResult
+from validator.scoring import score_bundle
+from validator.validator import judge_submission
 
 
 def _chain_dir(karpa_root: Path) -> Path:

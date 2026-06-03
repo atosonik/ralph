@@ -22,7 +22,6 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
 # ----------------------------- chain stub -----------------------------------
 
 # Phase 0 "chain" = JSON file under chain/. Every handshake commits an entry.
@@ -89,9 +88,9 @@ def _ensure_keypair(karpa_root: Path, miner_hotkey: str) -> tuple[bytes, bytes]:
         )
         from cryptography.hazmat.primitives.serialization import (
             Encoding,
+            NoEncryption,
             PrivateFormat,
             PublicFormat,
-            NoEncryption,
         )
     except ImportError:  # pragma: no cover
         raise RuntimeError("install `cryptography` for Phase 0 signer support") from None

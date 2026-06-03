@@ -11,7 +11,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401
-
 from validator.service import (
     KING_CHANGE_WEIGHT,
     MEANINGFUL_FAILURE_WEIGHT,
@@ -20,7 +19,6 @@ from validator.service import (
     _diff_is_nontrivial,
     _rationale_is_coherent,
 )
-
 
 # ----------------------------------------------------------------------------
 # Helpers

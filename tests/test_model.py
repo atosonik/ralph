@@ -9,9 +9,9 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
-
 from model import KarpaBase, KarpaConfig
+
+import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
 
 
 def test_forward_pass_runs_on_cpu():

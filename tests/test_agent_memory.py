@@ -1,7 +1,6 @@
 """Tests for miner.agent_memory."""
 from __future__ import annotations
 
-import json
 import sys
 import time
 from pathlib import Path
@@ -11,7 +10,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401
-
 from miner import agent_memory
 
 

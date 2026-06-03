@@ -83,7 +83,7 @@ class BittensorChain(ChainInterface):
         password = os.environ.get("BT_WALLET_PASSWORD")
         if password and self.wallet.coldkey_file.is_encrypted():
             self.wallet.coldkey_file.decrypt(password)
-            print(f"[chain] coldkey decrypted")
+            print("[chain] coldkey decrypted")
         self.subtensor = bt.Subtensor(network=network)
         self.metagraph = self.subtensor.metagraph(netuid=netuid)
 

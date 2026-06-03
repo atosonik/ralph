@@ -7,11 +7,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401
-
 from validator.service import (
-    _apply_pool_split,
     KING_POOL_FRACTION,
     MEANINGFUL_FAILURE_POOL_FRACTION,
+    _apply_pool_split,
 )
 
 

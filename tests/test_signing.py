@@ -14,8 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401
-
-from miner.submit import sign_submission, verify_signature, _signed_payload
+from miner.submit import _signed_payload, sign_submission, verify_signature
 
 
 def test_signature_roundtrip(tmp_path):

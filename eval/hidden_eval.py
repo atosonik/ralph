@@ -13,14 +13,14 @@ active subset for repeatable tests.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import torch
 
-from .val_bpb import compute_val_bpb, load_eval_tokens
 from .benchmark import compute_benchmark_score, make_placeholder_examples
+from .val_bpb import compute_val_bpb, load_eval_tokens
 
 
 @dataclass

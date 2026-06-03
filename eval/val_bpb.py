@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import torch

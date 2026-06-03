@@ -20,7 +20,6 @@ from dataclasses import asdict, dataclass
 import torch
 import torch.nn.functional as F
 
-
 # Fixed workload parameters — these MUST NOT change between runs that wish to
 # be cross-comparable. Changing them is a recipe-wide event coordinated by the
 # subnet-owner team alongside container-measurement updates.

@@ -19,11 +19,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Sequence
-
 
 # Fixed Phase 0 "team-signing secret" used by the mock signer. In Phase 0.5+
 # this is replaced by TDX/SEV-SNP hardware-root signing keys (which the
@@ -213,7 +211,10 @@ def verify_mock_attestation(
     """
     errors: list[str] = []
     if att.container_measurement != expected_container_measurement:
-        errors.append(f"container measurement mismatch (got {att.container_measurement[:16]}, expected {expected_container_measurement[:16]})")
+        errors.append(
+            f"container measurement mismatch (got {att.container_measurement[:16]}, "
+            f"expected {expected_container_measurement[:16]})"
+        )
     if att.handshake_nonce != expected_handshake_nonce:
         errors.append("handshake nonce mismatch")
     if att.bundle_hash != expected_bundle_hash:

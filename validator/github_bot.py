@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import urllib.error
 import urllib.request
@@ -27,7 +26,13 @@ GH_API = "https://api.github.com"
 RECIPE_REPO = "karpaai/recipe"
 
 
-def _gh(method: str, path: str, token: str, body: dict | None = None, accept: str = "application/vnd.github+json") -> dict | str:
+def _gh(
+    method: str,
+    path: str,
+    token: str,
+    body: dict | None = None,
+    accept: str = "application/vnd.github+json",
+) -> dict | str:
     url = f"{GH_API}{path}" if path.startswith("/") else path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)

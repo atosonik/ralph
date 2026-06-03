@@ -29,24 +29,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
 import shutil
 import signal
 import sys
 import time
 import traceback
-from dataclasses import asdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR onto sys.path
-
 from chain_layer.config import get_chain
-from validator.validator import judge_submission
+from validator.hf_poller import DEFAULT_REPO as DEFAULT_HF_REPO
+from validator.hf_poller import poll_hub
 from validator.scoring import score_bundle
-from validator.hf_poller import poll_hub, DEFAULT_REPO as DEFAULT_HF_REPO
+from validator.validator import judge_submission
+
 
 # Bittensor's bt.logging hijacks Python's logging module and raises the root
 # level to WARNING, silencing our INFO messages. Use direct prints with
@@ -807,8 +806,13 @@ def main():
                    help="Seconds between epochs (default: 120, ~10 blocks)")
     p.add_argument("--noise-floor", type=float, default=0.013,
                    help="val_bpb margin for 'decisively beats king' (default: 0.013 from H100 calibration)")
-    p.add_argument("--hf-repo", default=os.environ.get("KARPA_HF_REPO", DEFAULT_HF_REPO),
-                   help=f"HuggingFace dataset repo to poll (default: {DEFAULT_HF_REPO}). Set to empty string to disable.")
+    p.add_argument(
+        "--hf-repo", default=os.environ.get("KARPA_HF_REPO", DEFAULT_HF_REPO),
+        help=(
+            f"HuggingFace dataset repo to poll (default: {DEFAULT_HF_REPO}). "
+            "Set to empty string to disable."
+        ),
+    )
     p.add_argument("--hf-token", default=os.environ.get("HF_TOKEN"),
                    help="HuggingFace API token (defaults to $HF_TOKEN)")
     p.add_argument("--hf-limit", type=int, default=10,

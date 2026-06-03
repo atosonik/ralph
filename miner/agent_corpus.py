@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 from .agent_memory import KARPA_ROOT, read_memory
-
 
 CHAIN_DIR = KARPA_ROOT / "chain"
 QUEUE_DIR = KARPA_ROOT / "queue"
@@ -264,7 +262,10 @@ def format_for_prompt(
             parts.append(f"- val_bpb {k.val_bpb:.4f} · {k.miner_hotkey[:12]}… · bundle {k.bundle_hash[:12]}…")
         parts.append("")
 
-    parts.append(f"## Noise floor margin\n{get_noise_floor():.4f} val_bpb — your patch must beat the king by more than this to crown.\n")
+    parts.append(
+        f"## Noise floor margin\n{get_noise_floor():.4f} val_bpb — "
+        "your patch must beat the king by more than this to crown.\n"
+    )
 
     negs = recent_meaningful_failures(limit=n_negatives)
     if negs:

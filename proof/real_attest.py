@@ -29,9 +29,7 @@ import os
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 from typing import Optional
-
 
 # ============================================================================
 # Data structures — same shape as mock_attest.py for validator compatibility
@@ -433,7 +431,7 @@ def verify_attestation(
     errors: list[str] = []
 
     if att.container_measurement != expected_container_measurement:
-        errors.append(f"container measurement mismatch")
+        errors.append("container measurement mismatch")
     if att.handshake_nonce != expected_handshake_nonce:
         errors.append("handshake nonce mismatch")
     if att.bundle_hash != expected_bundle_hash:

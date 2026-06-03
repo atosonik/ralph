@@ -38,9 +38,8 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from calibration import run_calibration
-from proof.real_attest import generate_attestation, detect_capabilities
+from proof.real_attest import detect_capabilities, generate_attestation
 from proof.sources import compute_container_measurement
-
 
 # Allowlist of env vars the patched training subprocess is permitted to see.
 # Miners control recipe/train.py via patch.diff, so anything inherited by the
@@ -415,7 +414,7 @@ def run_proof_test(
         print(f"[proof] tier=verified, attestation_type={attestation.attestation_type} "
               f"(tdx={caps['tdx']}, nvcc={caps['nvcc']})")
     else:
-        print(f"[proof] tier=unverified, no attestation chain generated")
+        print("[proof] tier=unverified, no attestation chain generated")
 
     # 8. Bundle manifest: a single JSON listing every artifact + its hash.
     manifest = {

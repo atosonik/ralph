@@ -16,18 +16,17 @@ Failure on either test is treated as fraud (whitepaper §5.7).
 from __future__ import annotations
 
 import json
-import math
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import torch
-import numpy as np
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval import run_hidden_eval
 from model import KarpaBase, KarpaConfig
+
+from eval import run_hidden_eval
 from proof.runner import run_proof_test
 
 

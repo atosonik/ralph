@@ -10,8 +10,8 @@ patch. The search code itself is the miner's private IP.
 from .submit import (
     SubmissionBundle,
     assemble_submission,
-    sign_submission,
     request_handshake_nonce,
+    sign_submission,
 )
 
 __all__ = [

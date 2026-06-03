@@ -13,21 +13,16 @@ Runs the full Karpa Phase 0 flow:
 from __future__ import annotations
 
 import json
-import secrets
 import shutil
 import sys
 from pathlib import Path
 
-import torch
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
-
 from miner.submit import assemble_submission, request_handshake_nonce
 from proof.runner import run_proof_test
 from validator.router import process_submission
-
 
 # A tiny patch that nudges max_lr in the smoke config from 3e-3 to 5e-3.
 # Real autoresearch-style submissions would touch train.py or model code;

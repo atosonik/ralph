@@ -33,12 +33,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR onto sys.path
-
 from chain_layer.config import get_chain
-from proof.runner import run_proof_test
-from miner.submit import sign_submission
 from miner.hub import upload_bundle
-
+from miner.submit import sign_submission
+from proof.runner import run_proof_test
 
 KARPA_ROOT = Path(__file__).resolve().parent.parent
 
@@ -181,7 +179,7 @@ def run_miner(
         print(f"  rationale: {rationale_summary[:80]}{'…' if len(rationale_summary) > 80 else ''}")
 
     # ---- 2. Handshake — commit on-chain ------------------------------------
-    print(f"\n[1/6] handshake — committing (hotkey, patch_hash, nonce) on-chain...")
+    print("\n[1/6] handshake — committing (hotkey, patch_hash, nonce) on-chain...")
     nonce = chain.request_handshake_nonce(miner_hotkey, patch_hash)
     print(f"      nonce: {nonce[:32]}...")
 
@@ -193,7 +191,7 @@ def run_miner(
     }, indent=2))
 
     # ---- 3. Run the proof test ---------------------------------------------
-    print(f"\n[2/6] proof test — running canonical training...")
+    print("\n[2/6] proof test — running canonical training...")
     t0 = time.time()
     bundle = run_proof_test(
         karpa_root=KARPA_ROOT,
@@ -214,7 +212,7 @@ def run_miner(
         (proof_dir / "rationale.md").write_text(rationale_text)
 
     # ---- 4. Sign submission ------------------------------------------------
-    print(f"\n[3/6] signing submission...")
+    print("\n[3/6] signing submission...")
     # Sign over bundle_hash + nonce + hotkey + hypothesis-hash. Hypothesis
     # is folded in so the miner can't swap the rationale post-merge.
     sig = sign_submission(KARPA_ROOT, miner_hotkey, bundle.bundle_hash, nonce, hypothesis=rationale_summary)
@@ -227,11 +225,11 @@ def run_miner(
     gh_token = os.environ.get("KARPA_MINER_GH_TOKEN", "")
     upstream = os.environ.get("KARPA_RECIPE_UPSTREAM", "karpaai/recipe")
     if not patch_text.strip():
-        print(f"\n[4/6] skipping recipe PR (baseline submission, empty patch)")
+        print("\n[4/6] skipping recipe PR (baseline submission, empty patch)")
     elif skip_upload:
-        print(f"\n[4/6] skipping recipe PR (--skip-upload also implies no PR)")
+        print("\n[4/6] skipping recipe PR (--skip-upload also implies no PR)")
     elif not fork_url or not gh_token:
-        print(f"\n[4/6] WARNING: KARPA_RECIPE_FORK or KARPA_MINER_GH_TOKEN missing — not opening recipe PR")
+        print("\n[4/6] WARNING: KARPA_RECIPE_FORK or KARPA_MINER_GH_TOKEN missing — not opening recipe PR")
     else:
         print(f"\n[4/6] opening recipe PR against {upstream}...")
         from miner.github_pr import open_recipe_pr
@@ -271,7 +269,7 @@ def run_miner(
 
     # ---- 6. Upload bundle as a single HF PR (includes submission.json) -----
     if skip_upload:
-        print(f"\n[5/6] skipping HF upload (--skip-upload)")
+        print("\n[5/6] skipping HF upload (--skip-upload)")
         url = None
     else:
         print(f"\n[5/6] uploading bundle to HF Hub {hf_repo} as PR...")
@@ -288,14 +286,14 @@ def run_miner(
         )
 
     # ---- 7. Done -----------------------------------------------------------
-    print(f"\n[6/6] DONE")
+    print("\n[6/6] DONE")
     print(f"  bundle_hash: {bundle.bundle_hash}")
     print(f"  proof_dir:   {proof_dir}")
     if url:
         print(f"  hf url:      {url}")
     if pr_url:
         print(f"  pr:          {pr_url}")
-    print(f"\nValidators will now find this on HF Hub and score it.")
+    print("\nValidators will now find this on HF Hub and score it.")
     print(f"Track status: tail -f {KARPA_ROOT}/chain*/events.jsonl  (on validator host)")
 
     return {

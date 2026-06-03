@@ -18,15 +18,14 @@ HuggingFace Hub.
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
 
-import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import streamlit as st
 
 
 def load_events(karpa_root: Path) -> list[dict]:

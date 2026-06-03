@@ -26,11 +26,10 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Optional
-
-import urllib.request
-import urllib.error
 
 
 def _sweep_orphans_safe() -> None:
@@ -211,7 +210,7 @@ def cmd_rent(args):
         instance_data["ssh_user"] = info.get("ssh_user", "root")
         _save_instance(instance_data, name)
         if status == "active" and ip:
-            print(f"\nInstance ready!")
+            print("\nInstance ready!")
             print(f"  IP: {ip}")
             print(f"  SSH: ssh -i {SSH_KEY} {instance_data['ssh_user']}@{ip} -p {instance_data['ssh_port']}")
             print(f"  Cost: ${price:.2f}/hr")
@@ -242,7 +241,10 @@ def cmd_status(args):
     print(f"Type:    {inst.get('type', '?')} on {inst.get('cloud', '?')}")
     print(f"Price:   ${inst.get('price_per_hour', 0):.2f}/hr")
     print(f"Uptime:  {hours:.1f}h (est. cost: ${cost:.2f})")
-    print(f"SSH:     ssh -i {SSH_KEY} {inst.get('ssh_user', 'root')}@{inst.get('ip', '?')} -p {inst.get('ssh_port', 22)}")
+    ssh_user = inst.get("ssh_user", "root")
+    ssh_ip = inst.get("ip", "?")
+    ssh_port = inst.get("ssh_port", 22)
+    print(f"SSH:     ssh -i {SSH_KEY} {ssh_user}@{ssh_ip} -p {ssh_port}")
 
 
 def cmd_ssh(args):
@@ -281,9 +283,13 @@ def cmd_backup(args):
     ]
     # Find all final_state.json and training_log.jsonl
     result = subprocess.run(
-        ["ssh", "-i", str(SSH_KEY), "-p", str(port),
-         f"{user}@{ip}",
-         "find /workspace/karpa/runs -name 'final_state.json' -o -name 'training_log.jsonl' -o -name 'checkpoint.pt' -o -name 'data_manifest.json' 2>/dev/null | head -20"],
+        [
+            "ssh", "-i", str(SSH_KEY), "-p", str(port), f"{user}@{ip}",
+            "find /workspace/karpa/runs "
+            "-name 'final_state.json' -o -name 'training_log.jsonl' "
+            "-o -name 'checkpoint.pt' -o -name 'data_manifest.json' "
+            "2>/dev/null | head -20",
+        ],
         capture_output=True, text=True, timeout=15,
     )
     remote_files = [f.strip() for f in result.stdout.splitlines() if f.strip()]

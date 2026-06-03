@@ -23,7 +23,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-
 API_BASE = "https://api.shadeform.ai/v1"
 KEY_FILE = Path("/root/.shadeform_api_key")
 INSTANCE_FILE_PREFIX = "/root/.shadeform_instance_"

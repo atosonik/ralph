@@ -18,9 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401
-
-from proof.runner import scan_diff_for_restricted, _extract_diff_paths
-
+from proof.runner import _extract_diff_paths, scan_diff_for_restricted
 
 RESTRICTED = ["eval/**", "calibration/**", "validator/**", "proof/**", "restricted_files.yaml"]
 

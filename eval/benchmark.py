@@ -16,10 +16,6 @@ end-to-end pipeline has a non-trivial signal to score against.
 
 from __future__ import annotations
 
-import math
-from pathlib import Path
-from typing import Optional
-
 import numpy as np
 import torch
 

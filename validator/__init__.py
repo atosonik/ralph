@@ -6,15 +6,16 @@ RESTRICTED — Validator client. Miners do not see this code at runtime.
 # `from model import ...` / `from recipe.train import ...`.
 import sys as _sys
 from pathlib import Path as _Path
+
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 import karpa_bootstrap  # noqa: F401
 
+from .scoring import ScoreReport, score_bundle
 from .validator import (
-    ValidatorResult,
     ValidatorReject,
+    ValidatorResult,
     judge_submission,
 )
-from .scoring import score_bundle, ScoreReport
 
 __all__ = [
     "ValidatorResult",

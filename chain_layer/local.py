@@ -19,8 +19,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .interface import ChainInterface, HandshakeRecord, KingRecord
 from .bittensor_chain import _locked_append
+from .interface import ChainInterface, HandshakeRecord, KingRecord
 
 
 class LocalChain(ChainInterface):

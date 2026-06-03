@@ -12,18 +12,18 @@ The entry point is `run_proof_test()`. It:
   5. Emits a submission-ready directory with everything a validator needs.
 """
 
-from .runner import run_proof_test, ProofTestBundle
 from .mock_attest import (
+    MockAttestation,
     generate_mock_attestation,
     verify_mock_attestation,
-    MockAttestation,
 )
 from .real_attest import (
     RealAttestation,
+    detect_capabilities,
     generate_attestation,
     verify_attestation,
-    detect_capabilities,
 )
+from .runner import ProofTestBundle, run_proof_test
 
 __all__ = [
     "run_proof_test",

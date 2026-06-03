@@ -13,7 +13,6 @@ a Write member of the karpaai org.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 
@@ -46,7 +45,7 @@ def merge_pr(
         api.merge_pull_request(
             repo_id=repo_id, repo_type="dataset",
             discussion_num=pr_num,
-            comment=comment or f"Auto-merged by Karpa validator (king crowned).",
+            comment=comment or "Auto-merged by Karpa validator (king crowned).",
         )
         return HfMergeResult(pr_num=pr_num, merged=True, detail="merged")
     except Exception as e:

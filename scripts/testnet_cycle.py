@@ -26,16 +26,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
-
-from chain_layer.config import get_chain
-from proof.runner import run_proof_test
-from validator.validator import judge_submission
-from validator.scoring import score_bundle
-from miner.submit import sign_submission
-
 import bittensor as bt
 
+import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
+from chain_layer.config import get_chain
+from miner.submit import sign_submission
+from proof.runner import run_proof_test
+from validator.scoring import score_bundle
+from validator.validator import judge_submission
 
 KARPA_ROOT = Path(__file__).resolve().parent.parent
 
@@ -86,7 +84,7 @@ def submit_and_score(
     patch_hash = hashlib.sha256(patch_text.encode()).hexdigest()
 
     # 2. Handshake: commit nonce on-chain
-    print(f"  [handshake] committing nonce on-chain...")
+    print("  [handshake] committing nonce on-chain...")
     nonce = chain.request_handshake_nonce(miner_hotkey, patch_hash)
     print(f"  [handshake] nonce={nonce[:24]}...")
 
@@ -98,7 +96,7 @@ def submit_and_score(
     }))
 
     # 3. Proof test (CPU smoke — ~3 seconds)
-    print(f"  [proof] running canonical training...")
+    print("  [proof] running canonical training...")
     bundle = run_proof_test(
         karpa_root=KARPA_ROOT,
         submission_dir=sub_dir,
@@ -122,7 +120,7 @@ def submit_and_score(
     (proof_dir / "submission.json").write_text(json.dumps(submission, indent=2, sort_keys=True))
 
     # 5. Validator judges
-    print(f"  [validator] running 4 ops + hidden eval...")
+    print("  [validator] running 4 ops + hidden eval...")
     result = judge_submission(KARPA_ROOT, proof_dir)
     if result.rejected:
         print(f"  [REJECTED] {result.rejected.reason}: {result.rejected.detail}")
@@ -196,7 +194,7 @@ def submit_and_score(
         if king:
             hotkey_scores[king.miner_hotkey] = 1.0  # king keeps top weight
         chain.set_weights(hotkey_scores)
-        print(f"  [CHALLENGER] did not beat king, weights updated")
+        print("  [CHALLENGER] did not beat king, weights updated")
 
     return {
         "status": "accepted" if accepted else "below_threshold",
@@ -265,7 +263,7 @@ def main():
         print(f"    {etype:25s}  {miner}")
 
     # Show on-chain state
-    print(f"\n  On-chain metagraph (netuid 16):")
+    print("\n  On-chain metagraph (netuid 16):")
     chain.sync()
     for n in chain.metagraph.neurons[:5]:
         print(f"    uid={n.uid}  hotkey={n.hotkey[:16]}...  incentive={n.incentive}")

@@ -25,20 +25,22 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from eval import run_hidden_eval, HiddenEvalResult
 from model import KarpaBase, KarpaConfig
+
+from eval import HiddenEvalResult, run_hidden_eval
+from miner.submit import lookup_handshake, verify_signature
 from proof.mock_attest import (
     MockAttestation,
     verify_mock_attestation,
 )
 from proof.real_attest import (
     RealAttestation,
+)
+from proof.real_attest import (
     verify_attestation as verify_real_attestation,
 )
+from proof.runner import _load_restricted_paths, scan_diff_for_restricted
 from proof.sources import compute_container_measurement
-from proof.runner import scan_diff_for_restricted, _load_restricted_paths
-from miner.submit import verify_signature, lookup_handshake
-
 
 # Hard-coded sanity bounds for the miner-submitted model config. The validator
 # loads checkpoint['config'] from an attacker-controlled file; without bounds

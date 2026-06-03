@@ -12,14 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import karpa_bootstrap  # noqa: F401
-
 from validator.audit_scheduler import (
     _deterministic_audit_decision,
-    maybe_enqueue_audit,
-    list_pending_audits,
     archive_audit_job,
-    DEFAULT_RANDOM_AUDIT_RATE,
-    DEFAULT_KING_MARGIN_AUDIT_MULTIPLIER,
+    list_pending_audits,
+    maybe_enqueue_audit,
 )
 
 

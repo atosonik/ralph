@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-
 # Files/extensions that contribute to the container_measurement.
 # Keep tight: anything that affects training output must be here; nothing that
 # varies per host (timestamps, lockfiles, secrets) should be.
