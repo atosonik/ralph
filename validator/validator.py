@@ -395,6 +395,120 @@ def op3_log_plausibility(proof_dir: Path) -> tuple[bool, str]:
     return True, f"loss[0]={losses[0]:.3f} -> loss[-1]={losses[-1]:.3f}"
 
 
+def _is_state_dict_shape_mismatch(err: Exception) -> bool:
+    """Detect when a load_state_dict failure is due to architecture divergence
+    between the validator's canonical KarpaBase and the miner's trained model.
+
+    These are the recoverable cases — the miner's patch added/removed/renamed
+    parameters relative to canonical. We can retry under a patched-workdir
+    subprocess. Other RuntimeErrors (corrupt tensors, etc.) re-raise.
+    """
+    msg = str(err)
+    return (
+        "Unexpected key" in msg
+        or "Missing key" in msg
+        or "size mismatch" in msg
+    )
+
+
+def _patched_hidden_eval(
+    karpa_root: Path,
+    proof_dir: Path,
+    ckpt_path: Path,
+) -> tuple[bool, str, HiddenEvalResult | None]:
+    """Fallback path when canonical KarpaBase can't load the miner's checkpoint.
+
+    Creates a temp workdir, applies the miner's patch.diff against a copy of
+    the canonical recipe, and runs eval_in_workdir.py as a subprocess so the
+    patched model code is loaded fresh (no module-reload hazards in our own
+    interpreter). Returns the same triple shape as op4_hidden_eval so callers
+    don't need to branch on the path.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    from proof.runner import apply_patch
+
+    patch_path = proof_dir / "patch.diff"
+    if not patch_path.exists():
+        return False, "state_dict mismatch and no patch.diff to retry with", None
+
+    try:
+        from karpa_bootstrap import RECIPE_DIR
+    except Exception as e:
+        return False, f"patched-eval setup: bootstrap import failed: {e}", None
+
+    with tempfile.TemporaryDirectory(prefix="karpa_patched_eval_") as tmp:
+        workdir = Path(tmp) / "workdir"
+        workdir.mkdir(parents=True)
+        # Mirror the proof.runner layout: recipe sources from RECIPE_DIR, eval
+        # / calibration from the karpa protocol root.
+        for sub in ("model", "recipe", "data", "configs"):
+            src = RECIPE_DIR / sub
+            if src.exists():
+                shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
+        for sub in ("eval", "calibration"):
+            src = karpa_root / sub
+            if src.exists():
+                shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
+
+        try:
+            apply_patch(workdir, patch_path)
+        except Exception as e:
+            return False, f"patched-eval: patch apply failed: {str(e)[:200]}", None
+
+        helper = Path(__file__).resolve().parent / "eval_in_workdir.py"
+        if not helper.exists():
+            return False, f"patched-eval: helper script missing at {helper}", None
+
+        try:
+            res = subprocess.run(
+                [sys.executable, str(helper), str(workdir), str(ckpt_path), str(karpa_root)],
+                capture_output=True,
+                text=True,
+                timeout=240,
+            )
+        except subprocess.TimeoutExpired:
+            return False, "patched-eval subprocess timed out (>240s)", None
+        if res.returncode != 0:
+            tail = (res.stderr or "")[-300:]
+            return False, f"patched-eval subprocess exit={res.returncode}: {tail}", None
+
+        marker = "KARPA_EVAL_RESULT "
+        line = next(
+            (ln for ln in (res.stdout or "").splitlines() if ln.startswith(marker)),
+            None,
+        )
+        if line is None:
+            return False, "patched-eval: no KARPA_EVAL_RESULT line in stdout", None
+
+        fields: dict[str, str] = {}
+        for tok in line[len(marker):].split():
+            if "=" in tok:
+                k, v = tok.split("=", 1)
+                fields[k] = v
+        required = ("val_bpb", "benchmark_acc", "tokens_evaluated", "benchmark_examples", "eval_set_hash")
+        if not all(k in fields for k in required):
+            return False, f"patched-eval: malformed result line: {line!r}", None
+
+        try:
+            result = HiddenEvalResult(
+                val_bpb=float(fields["val_bpb"]),
+                benchmark_accuracy=float(fields["benchmark_acc"]),
+                tokens_evaluated=int(fields["tokens_evaluated"]),
+                benchmark_examples=int(fields["benchmark_examples"]),
+                eval_set_hash=fields["eval_set_hash"],
+            )
+        except ValueError as e:
+            return False, f"patched-eval: result line parse error: {e}", None
+        return (
+            True,
+            f"val_bpb={result.val_bpb:.4f} bench={result.benchmark_accuracy:.3f} (patched-eval)",
+            result,
+        )
+
+
 def op4_hidden_eval(
     karpa_root: Path,
     proof_dir: Path,
@@ -414,8 +528,17 @@ def op4_hidden_eval(
         ffn_mult=saved.get("ffn_mult", 8 / 3),
         max_seq_len=saved["max_seq_len"],
     )
-    model = KarpaBase(cfg)
-    model.load_state_dict(state_dict)
+    try:
+        model = KarpaBase(cfg)
+        model.load_state_dict(state_dict)
+    except RuntimeError as e:
+        # Architecture divergence between canonical KarpaBase and the miner's
+        # trained model (typically a structural patch that adds parameters).
+        # Retry under the patched workdir so the actually-trained model code
+        # is what scores the checkpoint.
+        if _is_state_dict_shape_mismatch(e):
+            return _patched_hidden_eval(karpa_root, proof_dir, ckpt_path)
+        raise
     if torch.cuda.is_available():
         model = model.cuda()
     result = run_hidden_eval(model, karpa_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
