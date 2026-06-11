@@ -80,7 +80,7 @@ PLAIN_FAILURE_WEIGHT = 0.0
 NOISE_FLOOR_MARGIN_2X_MULTIPLIER = 2.0
 RATIONALE_MIN_NON_WS_CHARS = 200
 RATIONALE_MIN_PARAGRAPHS = 2
-DIFF_MIN_CHANGED_LINES = 5
+DIFF_MIN_CHANGED_LINES = 1  # >1 means ≥2 changed lines — admits single-scalar hypothesis tests
 
 KARPA_ROOT = Path(__file__).resolve().parent.parent
 SHUTDOWN = False
@@ -135,11 +135,26 @@ def _verify_pr_if_required(result, bundle_dir: Path) -> tuple[bool, str]:
     return v.ok, v.detail
 
 
+# Paths that count as "training-relevant" for the meaningful_failure gate.
+# Anything under these directories OR matching these suffixes qualifies — a
+# patch touching at least one of them passes the touches_training half of the
+# _diff_is_nontrivial check.
+#
+# Includes `model/` so structural patches (attention variants, init schemes,
+# residual scaling, etc.) earn credit on the attention_variant / init_scheme /
+# structural axes. Without `model/`, a clean QK-Norm patch can beat the king
+# on val_bpb and still be classified plain_failure for "not touching training."
+_TRAINING_RELEVANT_PATH_TOKENS = (
+    "recipe/", "training", "/optim", "configs/", "model/", "data/",
+    ".yaml", ".yml", ".json", ".toml",
+)
+
+
 def _diff_is_nontrivial(patch_path: Path) -> bool:
     """A diff is non-trivial if it changes more than DIFF_MIN_CHANGED_LINES
     non-whitespace, non-comment lines AND at least one of the touched files
-    looks like it actually affects training (under recipe/, training/, or
-    a *.yaml / *.yml config)."""
+    looks like it actually affects training (model code, recipe code,
+    training config, or data pipeline)."""
     if not patch_path.exists():
         return False
     try:
@@ -151,7 +166,7 @@ def _diff_is_nontrivial(patch_path: Path) -> bool:
     for line in text.splitlines():
         if line.startswith("diff --git ") or line.startswith("+++ ") or line.startswith("--- "):
             ll = line.lower()
-            if any(t in ll for t in ("recipe/", "training", "/optim", "configs/", ".yaml", ".yml", ".json", ".toml")):
+            if any(t in ll for t in _TRAINING_RELEVANT_PATH_TOKENS):
                 touches_training = True
             continue
         if line.startswith("+") or line.startswith("-"):

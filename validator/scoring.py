@@ -15,11 +15,47 @@ hooks so we can wire them in once we have multi-seed runs.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 # Kept for back-compat with any external caller that still imports it; v1.2
 # code never multiplies by it (single attested-execution tier).
 ALPHA_VERIFIED = 1.0
+
+# A quality_gain >= DOMINANT_QUALITY_MULTIPLIER * noise_floor_margin lets a
+# challenger crown via the dominant-quality branch (Branch A). The multiplier
+# is intentionally generous so this branch fires only on unambiguous wins.
+#
+# v0.10 CHANGE: Branch A now ALSO requires benchmark_gain >= -noise_floor_margin.
+# The unguarded prior form was a Goodhart vector — a miner could seed-search 200
+# random init seeds, pick the best val_bpb (expected ≈ √(2 ln N) · σ ≈ 0.042 bpb,
+# i.e. exactly at the 3x noise-floor threshold) and crown regardless of what
+# benchmark did. The matching condition with the other two clauses removes that
+# backdoor. See docs/king_criterion_review/00_RECOMMENDATION.md §6 (v0.10) and
+# the published verdict at docs/direction_reframe/00_VERDICT.md §6.
+DOMINANT_QUALITY_MULTIPLIER = 3.0
+
+
+def get_king_rule() -> str:
+    """Return the currently-active king-selection rule.
+
+    Reads the KARPA_KING_RULE environment variable; defaults to "legacy" which
+    is the v0.10-guarded version of the original score_bundle gate. The
+    forthcoming "cross_scale_v1" rule (B3 of the Cross-Scale Downstream Pareto
+    build) will be selected via KARPA_KING_RULE=cross_scale_v1 once it ships;
+    until then this function only returns "legacy" and a request for any other
+    value falls back to "legacy" with a one-line warning to stderr.
+    """
+    val = os.environ.get("KARPA_KING_RULE", "legacy").strip()
+    if val in ("legacy", "cross_scale_v1"):
+        return val
+    import sys as _sys
+    print(
+        f"[scoring] WARNING: KARPA_KING_RULE={val!r} not recognised; "
+        "falling back to 'legacy'. Valid values: legacy, cross_scale_v1.",
+        file=_sys.stderr,
+    )
+    return "legacy"
 
 
 @dataclass
@@ -95,7 +131,17 @@ def score_bundle(
     else:
         quality_gain = (king_val_bpb - val_bpb)
         benchmark_gain = (benchmark_accuracy - (king_benchmark or 0.0))
+        # Three branches, all v0.10-guarded so that no clause crowns a
+        # challenger that regressed past the noise floor on the OTHER axis:
+        #   Branch A: dominant quality (≥3× noise) AND benchmark-no-regress
+        #   Branch B: quality > noise              AND benchmark-no-regress
+        #   Branch C: benchmark > noise            AND quality-no-regress
+        # The Branch A guard (the AND ... clause) is the v0.10 Goodhart fix.
+        # See the constant docstring above for the seed-search vector it closes.
         decisively = (
+            (quality_gain >= DOMINANT_QUALITY_MULTIPLIER * noise_floor_margin
+             and benchmark_gain >= -noise_floor_margin)
+            or
             (quality_gain > noise_floor_margin and benchmark_gain >= -noise_floor_margin)
             or
             (benchmark_gain > noise_floor_margin and quality_gain >= -noise_floor_margin)

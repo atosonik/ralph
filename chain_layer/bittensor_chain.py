@@ -353,9 +353,24 @@ class BittensorChain(ChainInterface):
         events = [json.loads(l) for l in lines if l.strip()]
         return list(reversed(events[-limit:]))
 
+    def get_current_block(self) -> int:
+        return int(self.subtensor.get_current_block())
+
+    def get_block_hash(self, block: int) -> str:
+        if block < 0:
+            raise ValueError(f"block must be >= 0, got {block}")
+        raw = self.subtensor.get_block_hash(block)
+        if not isinstance(raw, str) or not raw:
+            raise ValueError(f"chain returned no hash for block {block}: {raw!r}")
+        body = raw[2:] if raw[:2].lower() == "0x" else raw
+        body = body.lower()
+        if len(body) != 64 or any(c not in "0123456789abcdef" for c in body):
+            raise ValueError(f"chain returned malformed hash for block {block}: {raw!r}")
+        return "0x" + body
+
     def _current_block(self) -> int:
         try:
-            return self.subtensor.get_current_block()
+            return self.get_current_block()
         except Exception:
             return 0
 

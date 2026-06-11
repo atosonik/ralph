@@ -70,6 +70,32 @@ class ChainInterface(ABC):
     def get_events(self, limit: int = 100) -> list[dict]:
         """Return recent events, newest first."""
 
+    @abstractmethod
+    def get_current_block(self) -> int:
+        """Return the current chain block height — monotonically non-decreasing.
+
+        LocalChain treats this as the number of events appended so far;
+        BittensorChain wraps subtensor.get_current_block().
+        """
+
+    @abstractmethod
+    def get_block_hash(self, block: int) -> str:
+        """Return a deterministic hex hash for the given block height.
+
+        Used as a randomness seed source for validator-controlled operations:
+        multi-seed eval (Track A v0.10), EpochSeeds derivation for on-chain
+        stream selection (Cross-Scale Downstream Pareto), and any other gate
+        that must derive randomness no single miner can fake.
+
+        Properties:
+          - Deterministic: same block → same hash, forever
+          - Public: derivable by any node observing the chain
+          - Unfakeable: no single miner can choose the value
+
+        Format: 64 lowercase hex chars prefixed with "0x" (66 chars total).
+        Raises ValueError if `block` is negative or exceeds the current height.
+        """
+
     def blacklist(self, hotkey: str, reason: str = "") -> None:
         """Mark a miner-hotkey as blacklisted. Subsequent set_weights MUST
         zero its weight regardless of round_scores. Default no-op so

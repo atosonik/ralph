@@ -13,6 +13,7 @@ Bittensor backend can slot in without changing callers.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import time
@@ -131,3 +132,23 @@ class LocalChain(ChainInterface):
         lines = path.read_text().splitlines()
         events = [json.loads(l) for l in lines if l.strip()]
         return list(reversed(events[-limit:]))
+
+    def get_current_block(self) -> int:
+        path = self.chain_dir / "events.jsonl"
+        if not path.exists():
+            return 0
+        return sum(1 for line in path.read_text().splitlines() if line.strip())
+
+    def get_block_hash(self, block: int) -> str:
+        if block < 0:
+            raise ValueError(f"block must be >= 0, got {block}")
+        current = self.get_current_block()
+        if block > current:
+            raise ValueError(f"block {block} exceeds current height {current}")
+        path = self.chain_dir / "events.jsonl"
+        if not path.exists() or block == 0:
+            payload = b""
+        else:
+            lines = [ln for ln in path.read_text().splitlines() if ln.strip()]
+            payload = "\n".join(lines[:block]).encode("utf-8")
+        return "0x" + hashlib.blake2b(payload, digest_size=32).hexdigest()
