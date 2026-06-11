@@ -253,6 +253,46 @@ def score_schema(
     return predictions
 
 
+def score_mc_logprobs(
+    forward_logits: Callable[[torch.Tensor], torch.Tensor],
+    examples: list[MCExample],
+    *,
+    length_normalize: bool = True,
+) -> list[list[float]]:
+    """Like score_mc but returns the per-choice log-probabilities instead
+    of the argmax index.
+
+    Used by grader.py to compute `gold_margin_bits = log_p(gold) -
+    max_{d != gold} log_p(d)` per example. Inner lists are in choice
+    order; lengths match `examples[i].choice_ids` lengths.
+    """
+    result: list[list[float]] = []
+    for ex in examples:
+        scores: list[float] = []
+        for choice_ids in ex.choice_ids:
+            lp = _logprob_of_continuation(forward_logits, ex.context_ids, choice_ids)
+            if length_normalize and len(choice_ids) > 0:
+                lp = lp / len(choice_ids)
+            scores.append(lp)
+        result.append(scores)
+    return result
+
+
+def score_schema_logprobs(
+    forward_logits: Callable[[torch.Tensor], torch.Tensor],
+    examples: list[SchemaExample],
+) -> list[list[float]]:
+    """Like score_schema but returns per-variant log-probabilities instead
+    of the argmax index. Symmetric to score_mc_logprobs; used by grader.py."""
+    result: list[list[float]] = []
+    for ex in examples:
+        scores: list[float] = []
+        for ctx, cont in zip(ex.context_ids, ex.continuation_ids):
+            scores.append(_logprob_of_continuation(forward_logits, ctx, cont))
+        result.append(scores)
+    return result
+
+
 def score_lm(
     forward_logits: Callable[[torch.Tensor], torch.Tensor],
     examples: list[LMExample],
