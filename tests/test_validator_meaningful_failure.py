@@ -79,6 +79,10 @@ def test_diff_missing(tmp_path):
 
 
 def test_diff_too_few_lines(tmp_path):
+    """A single-line diff doesn't clear DIFF_MIN_CHANGED_LINES (1) — needs
+    at least 2 changed lines so trivial typo/whitespace patches don't earn
+    meaningful_failure credit. The cleanest legitimate hypothesis test is a
+    one-scalar change which adds + removes one line each (2 total)."""
     diff = """diff --git a/recipe/config.yaml b/recipe/config.yaml
 --- a/recipe/config.yaml
 +++ b/recipe/config.yaml
@@ -87,6 +91,48 @@ def test_diff_too_few_lines(tmp_path):
     p = tmp_path / "p.diff"
     p.write_text(diff)
     assert _diff_is_nontrivial(p) is False
+
+
+def test_diff_single_scalar_two_lines_is_nontrivial(tmp_path):
+    """The cleanest possible hypothesis test (change one scalar; old line
+    out, new line in) MUST qualify as nontrivial. Round-2 round-trip:
+    B's max_lr change was 4 lines (max_lr + min_lr both changed), and was
+    incorrectly rejected by the old DIFF_MIN_CHANGED_LINES=5 rule despite
+    delivering a 0.087 val_bpb improvement. The new floor (>1) admits any
+    real scalar change."""
+    diff = """diff --git a/configs/proxy_cpu_smoke.json b/configs/proxy_cpu_smoke.json
+--- a/configs/proxy_cpu_smoke.json
++++ b/configs/proxy_cpu_smoke.json
+@@ -12,3 +12,3 @@
+   "total_steps": 20,
+-  "max_lr": 0.003,
++  "max_lr": 0.0036,
+   "log_every": 2
+"""
+    p = tmp_path / "p.diff"
+    p.write_text(diff)
+    assert _diff_is_nontrivial(p) is True
+
+
+def test_diff_model_dir_counts_as_training_relevant(tmp_path):
+    """A structural patch to model/karpa_base.py (e.g. QK-Norm) MUST count
+    as touching training. The old filename whitelist omitted model/, which
+    blocked attention-variant / init-scheme / structural-axis submissions
+    from ever qualifying as meaningful_failure even when they beat the king
+    on val_bpb. Round-2 round-trip: A's QK-Norm patch (val_bpb=1.485, beats
+    king by 0.026) was incorrectly classified plain_failure for this reason."""
+    diff = """diff --git a/model/karpa_base.py b/model/karpa_base.py
+--- a/model/karpa_base.py
++++ b/model/karpa_base.py
+@@ -38,1 +38,4 @@
+     tie_embeddings: bool = True
++    use_qk_norm: bool = True
++    q_norm = RMSNorm(cfg.head_dim)
++    k_norm = RMSNorm(cfg.head_dim)
+"""
+    p = tmp_path / "p.diff"
+    p.write_text(diff)
+    assert _diff_is_nontrivial(p) is True
 
 
 def test_diff_not_training_path(tmp_path):
