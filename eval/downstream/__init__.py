@@ -13,9 +13,11 @@ What B1 has shipped so far:
   * scorer.py: score_mc / score_schema / score_lm kernels (pure functions
     over pre-tokenized examples; model-agnostic via a forward_logits
     callable)
+  * core22.py: the 22-task registry + per-task evaluators that wire scorer
+    kernels to CellResult outputs. Bundle URL pinned (B1-D2); bundle
+    download itself stubbed until the SHA-pin commit.
 
 What B1 will ship (separate commits within the phase):
-  * core22.py: the 22-task DCLM CORE eval bundle adapter
   * private_hard.py: the 4-task private hardness subset adapter
   * grader.py: one-shot offline grader → eval/private/hardness/index.parquet
   * calibration.py: N=10 baseline runs → noise_floors_v1.json
@@ -26,6 +28,16 @@ Reference scope: docs/build_scope/02_scope_B1.md.
 from __future__ import annotations
 
 from .aggregate import aggregate_pareto
+from .core22 import (
+    DCLM_CORE_22_TASKS,
+    DCLM_EVAL_BUNDLE_SHA256,
+    DCLM_EVAL_BUNDLE_URL,
+    TASK_SPECS,
+    evaluate_lm_task_lambada,
+    evaluate_mc_task,
+    evaluate_schema_task,
+    to_cell_result,
+)
 from .scorer import (
     LMExample,
     MCExample,
@@ -51,6 +63,9 @@ from .types import (
 __all__ = [
     "BPB_SUFFIX",
     "CellResult",
+    "DCLM_CORE_22_TASKS",
+    "DCLM_EVAL_BUNDLE_SHA256",
+    "DCLM_EVAL_BUNDLE_URL",
     "DownstreamReport",
     "HARNESS_VERSION",
     "LMExample",
@@ -62,9 +77,14 @@ __all__ = [
     "ParetoOutcome",
     "ParetoVerdict",
     "SchemaExample",
+    "TASK_SPECS",
     "TaskSpec",
     "aggregate_pareto",
+    "evaluate_lm_task_lambada",
+    "evaluate_mc_task",
+    "evaluate_schema_task",
     "score_lm",
     "score_mc",
     "score_schema",
+    "to_cell_result",
 ]
