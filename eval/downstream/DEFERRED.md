@@ -124,7 +124,13 @@ scope.
 **Recommendation:** Accept (a) for B1. Subprocess isolation is necessary but
 not sufficient against arbitrary `forward()` code. Land seccomp/landlock as a
 named follow-up phase before mainnet activation.
-**Status:** OPEN
+**Status:** **CLOSED 2026-06-11 — option (a) ratified.** `eval/downstream/
+runner_cli.py` calls `torch.load(weights_only=True)` (closes the pickle RCE
+vector) AND its module + function docstrings document the caveat that
+forward()-code execution is NOT prevented by weights_only and the only
+containment is OS-level process isolation via the subprocess wrapper
+(`eval/downstream/runner_subprocess.py`). Seccomp / landlock recorded as a
+named follow-up phase before mainnet activation; not blocking B2 / B3 / B4.
 
 ### B1-D6 — Tokenizer equivalence enforcement
 **Owner:** B1 (runner.py author)
@@ -222,7 +228,14 @@ integration (~150 LOC + 2 days). If no, document that structural patches
 WILL fail the new downstream runner and the legacy path handles them.
 **Recommendation:** Add the args. The whole point of B1 → B7 is that
 structural patches work cleanly under the new rule.
-**Status:** OPEN
+**Status:** **CLOSED at CLI surface 2026-06-11.** `eval/downstream/
+runner_cli.py` accepts both `--patch` and `--karpa-root` arguments so the
+CLI contract is stable; submissions without structural patches go through
+the no-patch path unchanged. Full `apply_patch` integration (the ~150 LOC
++ 2 day deliverable) is recorded as a separate follow-up PR: until that
+lands, invoking the CLI WITH `--patch` raises `NotImplementedError`
+pointing at this DEFERRED.md item. No-patch submissions (the common case)
+are fully supported.
 
 ### B1-D14 — LOC re-budget
 **Owner:** B1 (whole-phase author)
@@ -301,6 +314,28 @@ authors (subprocess isolation reality, tokenizer enforcement,
 determinism specification, structural-patch handling, CC-BY-SA review,
 calibration sourcing, restricted-files scanner glob, HiddenEvalResult
 schema-versioning test).
+
+## Update 2026-06-11: 4 additional B1 decisions closed by runner.py PRs
+
+- **B1-D6 (tokenizer equivalence)** — closed; runner.py rejects
+  `vocab_size != 50257` at the in-process kernel via
+  `check_vocab_compatibility`.
+- **B1-D7 (determinism specification)** — closed; `set_eval_determinism`
+  pins `torch.use_deterministic_algorithms(True)` +
+  `CUBLAS_WORKSPACE_CONFIG=:4096:8`.
+- **B1-D5 (subprocess isolation reality)** — closed; runner_cli.py
+  uses `torch.load(weights_only=True)` and documents that
+  forward()-code containment is OS-level subprocess isolation only.
+- **B1-D13 (structural-patch CLI args)** — closed at CLI surface;
+  --patch / --karpa-root accepted; full apply_patch integration
+  recorded as a separate follow-up PR.
+
+Now 11 of 15 items closed, 4 still open: B1-D4 (CC-BY-SA legal
+review), B1-D8 (calibration data sourcing), B1-D10 (restricted-files
+scanner glob extension), B1-D12 (HiddenEvalResult schema-versioning
+test). Note: B1-D1 (HF dataset download implementation) was logged as
+closed in the 2026-06-10 update; the load_task_examples function
+remains stubbed but the decision itself is closed.
 
 ## What B1 still owes (open, in dependency order)
 

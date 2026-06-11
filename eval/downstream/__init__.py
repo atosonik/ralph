@@ -23,12 +23,13 @@ What B1 has shipped so far:
   * runner.py (kernel): EvalConfig + vocab/determinism guards +
     in-process run_downstream_eval driver (B1-D6, B1-D7 closed)
   * runner_subprocess.py: caller-side subprocess wrapper +
-    EvalSubprocessError + JSON IPC contract for the (forthcoming)
-    CLI entrypoint
+    EvalSubprocessError + JSON IPC contract
+  * runner_cli.py: production CLI entrypoint — argparse +
+    `torch.load(weights_only=True)` checkpoint load + KarpaBase
+    model construction + tiktoken GPT-2 BPE tokenizer wiring +
+    structural-patch CLI args (B1-D5, B1-D13 closed)
 
 What B1 will ship (separate commits within the phase):
-  * runner_cli.py: argparse + weights_only checkpoint load +
-    structural-patch path (closes B1-D5, B1-D13)
   * calibration.py: N=10 baseline runs → noise_floors_v1.json
 
 Reference scope: docs/build_scope/02_scope_B1.md.
