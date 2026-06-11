@@ -82,7 +82,9 @@ class ValidatorResult:
             "pr_url": self.pr_url,
             "bundle_hash": self.bundle_hash,
             "handshake_nonce": self.handshake_nonce,
-            "hidden_eval": asdict(self.hidden_eval) if self.hidden_eval else None,
+            # Use to_legacy_dict() so the chain payload stays byte-equivalent
+            # to pre-v0.11 form when downstream is None (B1-D12 contract).
+            "hidden_eval": self.hidden_eval.to_legacy_dict() if self.hidden_eval else None,
             "training_summary": self.training_summary,
             "calibration": self.calibration,
             "operations": self.operations,

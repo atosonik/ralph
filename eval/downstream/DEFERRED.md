@@ -234,7 +234,18 @@ miner-side modification vector before the harness goes live.
 with `downstream=None` is byte-equivalent to a legacy serialization.
 **Recommendation:** Land. Prevents source-compat surprises during the
 v0.10 → v0.11 transition.
-**Status:** OPEN
+**Status:** **CLOSED 2026-06-11.** `eval/hidden_eval.py::HiddenEvalResult`
+extended with `downstream: DownstreamReport | None = None` + a
+`to_legacy_dict()` method that omits the `downstream` key when it's None
+(byte-equivalent to the pre-v0.11 `asdict()` shape). `validator/
+validator.py`'s chain serialization switched from raw `asdict()` to
+`to_legacy_dict()` so chain payloads stay byte-stable across the
+transition. 13 tests in `tests/test_hidden_eval_schema_versioning.py`
+pin: old-dict deserialization with the default firing, extra-key
+rejection (forward-compat asymmetry), missing-required-field rejection,
+to_legacy_dict byte equivalence (None and default cases), no
+`downstream` key when None, kwargs round-trip, populated-downstream
+inclusion, nested-cells shape via asdict, dataclass equality semantics.
 
 ## Decisions blocking the runner CLI contract
 

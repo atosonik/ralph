@@ -13,23 +13,59 @@ active subset for repeatable tests.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 import torch
 
 from .benchmark import compute_benchmark_score, make_placeholder_examples
+from .downstream.types import DownstreamReport
 from .val_bpb import compute_val_bpb, load_eval_tokens
 
 
 @dataclass
 class HiddenEvalResult:
+    """Validator-side scoring result for one checkpoint.
+
+    Schema versioning (B1-D12):
+      The `downstream` field is the v0.11 forward-compat extension
+      carrying the Cross-Scale Downstream Pareto report from the
+      v0.10 downstream-eval harness. Default `None` preserves the
+      pre-v0.11 contract — when `downstream is None`,
+      `to_legacy_dict()` produces a dict byte-equivalent to the
+      pre-v0.11 `dataclasses.asdict(...)` output, so old chain
+      consumers reading the legacy dict shape continue to work
+      against new validators that haven't filled in downstream yet.
+
+      Old serialized dicts (no `downstream` key) deserialize
+      cleanly via `HiddenEvalResult(**old_dict)` because the field
+      has a default. This is the asymmetric forward-compat property
+      B1-D12 calls out.
+    """
+
     val_bpb: float
     benchmark_accuracy: float
     tokens_evaluated: int
     benchmark_examples: int
     eval_set_hash: str
+    # B1-D12 forward-compat slot. When set, the v0.11+ chain consumer
+    # reads the Cross-Scale Downstream Pareto verdict via this field.
+    downstream: DownstreamReport | None = None
+
+    def to_legacy_dict(self) -> dict:
+        """Serialize, omitting `downstream` when it's None.
+
+        When `downstream is None` (the common case during the v0.10 →
+        v0.11 transition), the output is byte-identical to the
+        pre-v0.11 `dataclasses.asdict(self)` shape. When `downstream`
+        is populated, it's included as a nested dict (consumers that
+        don't know about it simply ignore the extra key).
+        """
+        d = asdict(self)
+        if d.get("downstream") is None:
+            d.pop("downstream", None)
+        return d
 
 
 def _stable_hash(obj) -> str:
