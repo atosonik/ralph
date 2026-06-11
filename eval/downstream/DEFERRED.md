@@ -160,7 +160,18 @@ baselines (adds hard dependency on A2), (c) ship `noise_floors_v0.json` as
 null-filled placeholders for B1 ship and complete in B5.
 **Recommendation:** (a). The cost is trivial and option (c) leaves the
 aggregator without floors which is brittle.
-**Status:** OPEN
+**Status:** **CLOSED at aggregation surface 2026-06-11 — option (a)
+ratified.** `eval/downstream/calibration.py` ships the
+`aggregate_noise_floors` kernel that takes N DownstreamReports and
+produces a `NoiseFloorTable` via per-task `margin_multiplier *
+max(stddev across scales)`. JSON round-trip via
+`write_noise_floor_table_json` / `read_noise_floor_table_json`. The
+**operational** half (train 10 baselines on H100, run each through
+`run_eval_in_subprocess`, feed reports into the aggregator) is gated
+on (1) `load_task_examples` being implemented (B1-D1 follow-up) and
+(2) an H100 instance for the ~$15 baseline-training pass. Recorded as
+a separate operational step, not blocking B2 / B3 / B4 code paths
+that consume `NoiseFloorTable` via the same dataclass contract.
 
 ### B1-D9 — `validator/scoring.py::score_ladder` reference removed from aggregate.py
 **Owner:** B1 (aggregate.py author) — **CLOSED in this commit**
@@ -336,6 +347,19 @@ scanner glob extension), B1-D12 (HiddenEvalResult schema-versioning
 test). Note: B1-D1 (HF dataset download implementation) was logged as
 closed in the 2026-06-10 update; the load_task_examples function
 remains stubbed but the decision itself is closed.
+
+## Update 2026-06-11 (later) — B1-D8 closed at aggregation surface
+
+- **B1-D8 (calibration data sourcing)** — closed; `calibration.py`
+  ships `aggregate_noise_floors` + JSON round-trip. Operational
+  baseline-training run (H100 + ~$15) recorded as a separate step,
+  not blocking B2 / B3 / B4 code that depends on the
+  `NoiseFloorTable` dataclass.
+
+Now 12 of 15 items closed, 3 still open: B1-D4 (CC-BY-SA legal
+review), B1-D10 (restricted-files scanner glob extension), B1-D12
+(HiddenEvalResult schema-versioning test). Each is a small,
+focused PR independent of the remaining B1 module sweep.
 
 ## What B1 still owes (open, in dependency order)
 

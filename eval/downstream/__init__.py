@@ -28,15 +28,26 @@ What B1 has shipped so far:
     `torch.load(weights_only=True)` checkpoint load + KarpaBase
     model construction + tiktoken GPT-2 BPE tokenizer wiring +
     structural-patch CLI args (B1-D5, B1-D13 closed)
+  * calibration.py: aggregate_noise_floors + per-cell stddev
+    diagnostic + noise_floors_v1.json round-trip (B1-D8 closed
+    at the aggregation surface; the H100 training-driver follow-up
+    will produce the actual file)
 
-What B1 will ship (separate commits within the phase):
-  * calibration.py: N=10 baseline runs → noise_floors_v1.json
+B1 module sweep complete — types, aggregate, scorer, core22,
+private_hard, grader, runner (kernel + subprocess + CLI),
+calibration.
 
 Reference scope: docs/build_scope/02_scope_B1.md.
 """
 from __future__ import annotations
 
 from .aggregate import aggregate_pareto
+from .calibration import (
+    aggregate_noise_floors,
+    compute_per_cell_stddev,
+    read_noise_floor_table_json,
+    write_noise_floor_table_json,
+)
 from .core22 import (
     DCLM_CORE_22_TASKS,
     DCLM_EVAL_BUNDLE_SHA256,
@@ -143,10 +154,12 @@ __all__ = [
     "SchemaRawRow",
     "TASK_SPECS",
     "TaskSpec",
+    "aggregate_noise_floors",
     "aggregate_pareto",
     "assemble_hardness_index",
     "check_vocab_compatibility",
     "compute_bottom_quintile",
+    "compute_per_cell_stddev",
     "deserialize_report",
     "evaluate_lm_task_lambada",
     "evaluate_mc_task",
@@ -159,6 +172,7 @@ __all__ = [
     "make_mc_example",
     "make_schema_example",
     "read_hardness_index_jsonl",
+    "read_noise_floor_table_json",
     "run_downstream_eval",
     "run_eval_in_subprocess",
     "score_lm",
@@ -172,4 +186,5 @@ __all__ = [
     "to_cell_result",
     "to_private_hard_cell_result",
     "write_hardness_index_jsonl",
+    "write_noise_floor_table_json",
 ]
