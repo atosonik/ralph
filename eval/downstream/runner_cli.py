@@ -47,13 +47,13 @@ What this module does NOT ship (separate follow-up PR):
     modified workdir. The args are accepted; full handling lands
     when the apply_patch helper is ready.
 
-  * `load_task_examples` implementations. Both `core22.load_task_examples`
-    and `private_hard.load_task_examples` are stubs that raise
-    NotImplementedError. The CLI's task_loaders dict will reach
-    those stubs and the subprocess will exit non-zero with a
-    clean error pointing at DEFERRED.md B1-D1. This is by design:
-    the CLI framework lands here; data-loading lands when the HF
-    download + DCLM bundle SHA-pin commits land.
+  * The DCLM bundle download + SHA-pin commit. `core22.load_task_examples`
+    is implemented and reads from a local bundle dir; the operational
+    `wget` + sha256sum step that pins the bundle constant is a
+    separate one-time concern (B1-D2 protocol). Similarly,
+    `private_hard.load_task_examples` is implemented and reads from
+    `{bundle_dir}/private_hard/{task}.jsonl` — the operator's HF
+    download + re-keying step populates that subdir.
 
 Reference scope: docs/build_scope/02_scope_B1.md "runner_cli.py".
 """
@@ -183,12 +183,14 @@ def _build_task_loaders(
 
     Dispatches by task name:
       * task in PRIVATE_HARD_TASK_SPECS → private_hard.load_task_examples
+        reads from `{bundle_dir}/private_hard/{task_name}.jsonl`.
       * otherwise (assumes task in TASK_SPECS) → core22.load_task_examples
+        reads from `{bundle_dir}/{task_name}.jsonl`.
 
-    Both `load_task_examples` calls currently raise NotImplementedError
-    (B1-D1 follow-up). The CLI plumbing reaches the loader call, the
-    loader raises, and the subprocess exits non-zero with the
-    NotImplementedError message in stderr.
+    The `private_hard` subdir convention keeps CORE-22 + private-hard
+    JSONLs from colliding in the same flat directory; the operator's
+    bundle-prep step is responsible for placing files under the right
+    subtree.
     """
     from .core22 import load_task_examples as core22_load
     from .private_hard import (
@@ -197,10 +199,11 @@ def _build_task_loaders(
     from .private_hard import (
         load_task_examples as private_hard_load,
     )
+    private_hard_dir = Path(bundle_dir) / "private_hard"
     loaders: dict[str, object] = {}
     for task in tasks:
         if task in PRIVATE_HARD_TASK_SPECS:
-            loaders[task] = (lambda t=task: private_hard_load(t))
+            loaders[task] = (lambda t=task: private_hard_load(private_hard_dir, t))
         else:
             loaders[task] = (lambda t=task: core22_load(bundle_dir, t))
     return loaders

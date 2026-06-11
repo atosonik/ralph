@@ -299,22 +299,166 @@ def test_to_private_hard_cell_result_rejects_core22_task_name():
 
 
 # ----------------------------------------------------------------------------
-# load_task_examples stub
+# load_task_examples — canonical JSONL parser
 # ----------------------------------------------------------------------------
 
 
-def test_load_task_examples_raises_not_implemented():
-    """Stub raises with a clear pointer to the DEFERRED.md item the first
-    downloader commit must follow."""
-    with pytest.raises(NotImplementedError) as exc_info:
-        load_task_examples("arc_challenge_hard")
-    msg = str(exc_info.value)
-    assert "DEFERRED.md" in msg
-    assert "B1-D1" in msg
+def _write_jsonl(path, rows):
+    """Helper: write a list of dicts as a JSONL file."""
+    import json as _json
+    path.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
 
 
-def test_load_task_examples_message_names_task():
-    """The error message includes the requested task name so a caller
-    can trace which load attempt blew up."""
-    with pytest.raises(NotImplementedError, match=r"tiny_mmlu"):
-        load_task_examples("tiny_mmlu")
+def test_load_task_examples_unknown_task_rejected(tmp_path):
+    with pytest.raises(ValueError, match=r"unknown private-hard task"):
+        load_task_examples(tmp_path, "not_a_real_task")
+
+
+def test_load_task_examples_missing_file_raises(tmp_path):
+    """Missing file raises with the upstream HF dataset id in the
+    message so the operator knows what to download."""
+    with pytest.raises(FileNotFoundError, match=r"ai2_arc"):
+        load_task_examples(tmp_path, "arc_challenge_hard")
+
+
+def test_load_task_examples_mc_happy_path(tmp_path):
+    """ARC-Challenge-hard parses to (id, MCRawRow) pairs."""
+    _write_jsonl(tmp_path / "arc_challenge_hard.jsonl", [
+        {"id": "ARC-456", "query": "Q1?", "choices": ["A", "B", "C", "D"], "gold": 0},
+        {"id": "ARC-789", "query": "Q2?", "choices": ["W", "X"], "gold": 1},
+    ])
+    rows = load_task_examples(tmp_path, "arc_challenge_hard")
+    assert len(rows) == 2
+    item_id_0, row_0 = rows[0]
+    assert item_id_0 == "ARC-456"
+    assert isinstance(row_0, MCRawRow)
+    assert row_0.query == "Q1?"
+    assert row_0.gold == 0
+    item_id_1, row_1 = rows[1]
+    assert item_id_1 == "ARC-789"
+    assert row_1.gold == 1
+
+
+def test_load_task_examples_schema_happy_path(tmp_path):
+    """winogrande-hard parses to (id, SchemaRawRow) pairs."""
+    _write_jsonl(tmp_path / "winogrande_hard.jsonl", [
+        {"id": "wg-1",
+         "contexts": ["The X did not Y because it", "The X did not Y because it"],
+         "continuations": ["was Z", "was W"],
+         "gold": 0},
+    ])
+    rows = load_task_examples(tmp_path, "winogrande_hard")
+    assert len(rows) == 1
+    item_id, row = rows[0]
+    assert item_id == "wg-1"
+    assert isinstance(row, SchemaRawRow)
+    assert row.gold == 0
+
+
+def test_load_task_examples_tiny_arc(tmp_path):
+    """tiny_arc routes through MC dispatch (mode='mc')."""
+    _write_jsonl(tmp_path / "tiny_arc.jsonl", [
+        {"id": "t1", "query": "Q?", "choices": ["a", "b", "c", "d"], "gold": 2},
+    ])
+    rows = load_task_examples(tmp_path, "tiny_arc")
+    assert len(rows) == 1
+    item_id, row = rows[0]
+    assert item_id == "t1"
+    assert row.gold == 2
+
+
+def test_load_task_examples_tiny_mmlu(tmp_path):
+    """tiny_mmlu routes through MC dispatch."""
+    _write_jsonl(tmp_path / "tiny_mmlu.jsonl", [
+        {"id": "m1", "query": "Q?", "choices": ["a", "b", "c", "d"], "gold": 1},
+    ])
+    rows = load_task_examples(tmp_path, "tiny_mmlu")
+    assert len(rows) == 1
+    item_id, row = rows[0]
+    assert item_id == "m1"
+    assert row.gold == 1
+
+
+def test_load_task_examples_skips_blank_lines(tmp_path):
+    path = tmp_path / "arc_challenge_hard.jsonl"
+    path.write_text(
+        '{"id": "a", "query": "q", "choices": ["x", "y"], "gold": 0}\n'
+        '\n'
+        '   \n'
+        '{"id": "b", "query": "q", "choices": ["x", "y"], "gold": 1}\n'
+    )
+    rows = load_task_examples(tmp_path, "arc_challenge_hard")
+    assert len(rows) == 2
+
+
+def test_load_task_examples_invalid_json_raises(tmp_path):
+    path = tmp_path / "arc_challenge_hard.jsonl"
+    path.write_text(
+        '{"id": "a", "query": "q", "choices": ["x", "y"], "gold": 0}\n'
+        '{not valid json\n'
+    )
+    with pytest.raises(ValueError, match=r":2"):
+        load_task_examples(tmp_path, "arc_challenge_hard")
+
+
+def test_load_task_examples_missing_id_raises(tmp_path):
+    """Private-hard requires `id` on every row (HardnessIndex routing)."""
+    _write_jsonl(tmp_path / "arc_challenge_hard.jsonl", [
+        {"query": "q", "choices": ["x", "y"], "gold": 0},  # no id
+    ])
+    with pytest.raises(ValueError, match=r"missing required 'id'"):
+        load_task_examples(tmp_path, "arc_challenge_hard")
+
+
+def test_load_task_examples_empty_id_raises(tmp_path):
+    _write_jsonl(tmp_path / "arc_challenge_hard.jsonl", [
+        {"id": "", "query": "q", "choices": ["x", "y"], "gold": 0},
+    ])
+    with pytest.raises(ValueError, match=r"non-empty string"):
+        load_task_examples(tmp_path, "arc_challenge_hard")
+
+
+def test_load_task_examples_non_string_id_raises(tmp_path):
+    _write_jsonl(tmp_path / "arc_challenge_hard.jsonl", [
+        {"id": 42, "query": "q", "choices": ["x", "y"], "gold": 0},
+    ])
+    with pytest.raises(ValueError, match=r"non-empty string"):
+        load_task_examples(tmp_path, "arc_challenge_hard")
+
+
+def test_load_task_examples_mc_out_of_range_gold_raises(tmp_path):
+    _write_jsonl(tmp_path / "arc_challenge_hard.jsonl", [
+        {"id": "a", "query": "q", "choices": ["x", "y"], "gold": 5},
+    ])
+    with pytest.raises(ValueError, match=r"gold=5 out of range"):
+        load_task_examples(tmp_path, "arc_challenge_hard")
+
+
+def test_load_task_examples_schema_length_mismatch_raises(tmp_path):
+    _write_jsonl(tmp_path / "winogrande_hard.jsonl", [
+        {"id": "w", "contexts": ["a", "b"], "continuations": ["x"], "gold": 0},
+    ])
+    with pytest.raises(ValueError, match=r"length mismatch"):
+        load_task_examples(tmp_path, "winogrande_hard")
+
+
+def test_load_task_examples_output_routes_through_evaluate(tmp_path):
+    """End-to-end: the loaded rows are the right shape for
+    evaluate_private_hard_task + a HardnessIndex."""
+    _write_jsonl(tmp_path / "arc_challenge_hard.jsonl", [
+        {"id": "a", "query": "q", "choices": ["x", "y"], "gold": 0},
+        {"id": "b", "query": "q", "choices": ["x", "y"], "gold": 0},
+    ])
+    rows = load_task_examples(tmp_path, "arc_challenge_hard")
+    idx = HardnessIndex(
+        version="v1",
+        rows=[HardnessIndexRow(
+            dataset="arc_challenge_hard",
+            item_id="a",
+            gold_margin_bits=0.0,
+        )],
+    )
+    selected = select_hardness_subset(rows, idx, "arc_challenge_hard")
+    # Only item_id "a" is in the index → 1 row.
+    assert len(selected) == 1
+    assert selected[0].query == "q"

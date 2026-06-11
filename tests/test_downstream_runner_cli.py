@@ -205,11 +205,11 @@ class TestBuildTaskLoaders:
             loaders["arc_easy"]()
 
     def test_private_hard_loader_calls_private_hard_load(self, tmp_path):
+        """The loader now reads from {bundle_dir}/private_hard/{task}.jsonl;
+        empty bundle dir → FileNotFoundError naming the upstream HF id."""
         loaders = _build_task_loaders(("tiny_mmlu",), tmp_path)
-        with pytest.raises(NotImplementedError) as exc_info:
+        with pytest.raises(FileNotFoundError, match=r"tiny_mmlu.jsonl"):
             loaders["tiny_mmlu"]()
-        # private_hard.load_task_examples mentions DEFERRED.md B1-D1.
-        assert "DEFERRED" in str(exc_info.value) or "B1-D1" in str(exc_info.value)
 
     def test_closure_binds_task_name(self, tmp_path):
         """Each loader must capture its own task name, not the loop's last."""

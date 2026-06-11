@@ -52,8 +52,10 @@ What this commit does NOT ship:
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .core22 import (
     LMRawRow,
@@ -271,31 +273,175 @@ def to_private_hard_cell_result(
 # ----------------------------------------------------------------------------
 
 
-def load_task_examples(task_name: str):
-    """Load raw rows for a private-hard task from HuggingFace Hub.
+def _read_jsonl(path: Path) -> list[dict]:
+    """Read a JSONL file → list of dicts. Skips blank lines, raises with
+    a line number on invalid JSON.
 
-    NOT IMPLEMENTED in this commit. The first commit that wires the HF
-    download must:
+    Independent of `core22._read_jsonl` (same shape, kept private to each
+    module to avoid cross-module coupling on a 10-line helper)."""
+    rows: list[dict] = []
+    with path.open() as f:
+        for line_no, line in enumerate(f, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                rows.append(json.loads(stripped))
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"invalid JSON at {path}:{line_no}: {e}"
+                ) from e
+    return rows
 
-      1. Verify each HF dataset's license matches the v0.10 commercial
-         posture (B1-D1 closed: tinyBenchmarks=MIT, ai2_arc=CC-BY-SA-4.0,
-         winogrande=CC-BY-4.0).
-      2. Cache datasets locally under
-         `eval/private/downstream_pool/private_hard/<task>/`.
-      3. Pin a SHA of the cached snapshot in this module so silent HF Hub
-         rotations are caught at load time.
-      4. Implement per-task parsing into MCRawRow / SchemaRawRow rows
-         keyed by the upstream `id` column.
-      5. Add tests/test_downstream_private_hard_loader.py with one task
-         driven end-to-end against the real dataset.
 
-    Until then this stub raises a clear error. Callers that test against
-    fixture rows can bypass this loader and pass `(item_id, raw_row)`
-    tuples directly to `evaluate_private_hard_task`.
+def _parse_id(row: dict, line_no: int) -> str:
+    """Extract and validate the `id` field — required for every
+    private-hard row so HardnessIndex lookup can route correctly."""
+    if "id" not in row:
+        raise ValueError(
+            f"row {line_no}: missing required 'id' field (private-hard "
+            "tasks require an item id for HardnessIndex lookup)"
+        )
+    item_id = row["id"]
+    if not isinstance(item_id, str) or not item_id:
+        raise ValueError(
+            f"row {line_no}: 'id' must be a non-empty string; got "
+            f"{item_id!r}"
+        )
+    return item_id
+
+
+def _parse_mc_with_id(row: dict, line_no: int) -> tuple[str, MCRawRow]:
+    """Parse a private-hard MC row with id.
+
+    Schema: {"id": str, "query": str, "choices": [str, ...], "gold": int}
+    Same as core22 MC + the id is mandatory and preserved.
     """
-    raise NotImplementedError(
-        f"load_task_examples({task_name!r}) is not implemented in B1 "
-        "foundation. The first commit that downloads HF datasets must "
-        "follow the protocol in eval/downstream/private_hard.py docstring + "
-        "DEFERRED.md items B1-D1 / B1-D4 / B1-D8."
+    item_id = _parse_id(row, line_no)
+    try:
+        query = str(row["query"])
+        choices = list(row["choices"])
+        gold = int(row["gold"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError(
+            f"row {line_no}: expected private-hard MC schema "
+            f"{{id, query, choices, gold}}; got error: {e}"
+        ) from e
+    if not all(isinstance(c, str) for c in choices):
+        raise ValueError(
+            f"row {line_no}: 'choices' must be a list of strings"
+        )
+    if not 0 <= gold < len(choices):
+        raise ValueError(
+            f"row {line_no}: gold={gold} out of range for "
+            f"{len(choices)} choices"
+        )
+    return item_id, MCRawRow(query=query, choices=choices, gold=gold)
+
+
+def _parse_schema_with_id(
+    row: dict, line_no: int,
+) -> tuple[str, SchemaRawRow]:
+    """Parse a private-hard schema row with id.
+
+    Schema: {"id": str, "contexts": [str, ...], "continuations": [str, ...],
+             "gold": int}
+    """
+    item_id = _parse_id(row, line_no)
+    try:
+        contexts = list(row["contexts"])
+        continuations = list(row["continuations"])
+        gold = int(row["gold"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError(
+            f"row {line_no}: expected private-hard schema "
+            f"{{id, contexts, continuations, gold}}; got error: {e}"
+        ) from e
+    if len(contexts) != len(continuations):
+        raise ValueError(
+            f"row {line_no}: contexts ({len(contexts)}) and "
+            f"continuations ({len(continuations)}) length mismatch"
+        )
+    if not all(isinstance(c, str) for c in contexts):
+        raise ValueError(
+            f"row {line_no}: 'contexts' must be a list of strings"
+        )
+    if not all(isinstance(c, str) for c in continuations):
+        raise ValueError(
+            f"row {line_no}: 'continuations' must be a list of strings"
+        )
+    if not 0 <= gold < len(contexts):
+        raise ValueError(
+            f"row {line_no}: gold={gold} out of range for "
+            f"{len(contexts)} variants"
+        )
+    return item_id, SchemaRawRow(
+        contexts=contexts, continuations=continuations, gold=gold,
     )
+
+
+def load_task_examples(
+    cache_dir: Path | str,
+    task_name: str,
+) -> list[tuple[str, MCRawRow | SchemaRawRow]]:
+    """Load `(item_id, raw_row)` pairs for a private-hard task.
+
+    Reads `{cache_dir}/{task_name}.jsonl` and parses each line per the
+    task's mode (`PRIVATE_HARD_TASK_SPECS[task_name].mode`). The item
+    id is preserved in the returned tuples so
+    `select_hardness_subset` can filter by the HardnessIndex.
+
+    JSONL schema (canonical Karpa form):
+      * mc:     {"id": str, "query": str, "choices": [str, ...], "gold": int}
+      * schema: {"id": str, "contexts": [str, ...],
+                 "continuations": [str, ...], "gold": int}
+
+    The `cache_dir` should be a local directory populated by the HF
+    download step (a separate operational concern — typically
+    `eval/private/downstream_pool/private_hard/`). If the HF datasets'
+    raw schemas differ (e.g. ai2_arc uses `question`/`choices.text` keys),
+    the downloader script re-keys them into the canonical form during
+    the cache-prep step.
+
+    Args:
+      cache_dir: directory containing per-task `<task>.jsonl` files.
+      task_name: one of `PRIVATE_HARD_TASKS`.
+
+    Raises:
+      ValueError if `task_name` is unknown.
+      FileNotFoundError if `{cache_dir}/{task_name}.jsonl` doesn't exist.
+      ValueError if any row fails per-mode parsing, with a message
+        naming the line number + missing/invalid field.
+      NotImplementedError if a task is registered with `mode == "lm"`
+        — none of today's private-hard tasks use LM mode; if a future
+        one does, plug `_parse_lm_with_id` here.
+    """
+    if task_name not in PRIVATE_HARD_TASK_SPECS:
+        raise ValueError(
+            f"unknown private-hard task {task_name!r}; expected one of "
+            f"{sorted(PRIVATE_HARD_TASKS)}"
+        )
+    cache_dir = Path(cache_dir)
+    path = cache_dir / f"{task_name}.jsonl"
+    if not path.exists():
+        upstream = HF_DATASET_IDS.get(task_name)
+        raise FileNotFoundError(
+            f"private-hard task file not found: {path}. Operator step: "
+            f"download {upstream!r} from HuggingFace Hub, re-key into the "
+            "canonical {id,...} schema, and cache the JSONL at this path."
+        )
+
+    spec = PRIVATE_HARD_TASK_SPECS[task_name]
+    raw_rows = _read_jsonl(path)
+    parsed: list[tuple[str, MCRawRow | SchemaRawRow]] = []
+    for i, row in enumerate(raw_rows, start=1):
+        if spec.mode == "mc":
+            parsed.append(_parse_mc_with_id(row, i))
+        elif spec.mode == "schema":
+            parsed.append(_parse_schema_with_id(row, i))
+        else:
+            raise NotImplementedError(
+                f"private-hard task {task_name!r} has mode "
+                f"{spec.mode!r}; only mc/schema are wired today"
+            )
+    return parsed
