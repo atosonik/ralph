@@ -20,10 +20,13 @@ What B1 has shipped so far:
     contract + bottom-quintile filter
   * grader.py: gold_margin_bits computation + per-task graders +
     HardnessIndex assembly + JSONL round-trip
+  * runner.py (kernel): EvalConfig + vocab/determinism guards +
+    in-process run_downstream_eval driver (B1-D6, B1-D7 closed)
 
 What B1 will ship (separate commits within the phase):
+  * runner.py subprocess wrapper: CLI + JSON IPC + weights_only
+    checkpoint load + structural-patch path (B1-D5, B1-D13)
   * calibration.py: N=10 baseline runs → noise_floors_v1.json
-  * runner.py: subprocess-isolated entrypoint
 
 Reference scope: docs/build_scope/02_scope_B1.md.
 """
@@ -65,6 +68,13 @@ from .private_hard import (
     select_hardness_subset,
     to_private_hard_cell_result,
 )
+from .runner import (
+    KARPA_VOCAB_SIZE,
+    EvalConfig,
+    check_vocab_compatibility,
+    run_downstream_eval,
+    set_eval_determinism,
+)
 from .scorer import (
     LMExample,
     MCExample,
@@ -96,10 +106,12 @@ __all__ = [
     "DCLM_EVAL_BUNDLE_SHA256",
     "DCLM_EVAL_BUNDLE_URL",
     "DownstreamReport",
+    "EvalConfig",
     "HARNESS_VERSION",
     "HF_DATASET_IDS",
     "HardnessIndex",
     "HardnessIndexRow",
+    "KARPA_VOCAB_SIZE",
     "LMExample",
     "LMRawRow",
     "MCExample",
@@ -118,6 +130,7 @@ __all__ = [
     "TaskSpec",
     "aggregate_pareto",
     "assemble_hardness_index",
+    "check_vocab_compatibility",
     "compute_bottom_quintile",
     "evaluate_lm_task_lambada",
     "evaluate_mc_task",
@@ -130,12 +143,14 @@ __all__ = [
     "make_mc_example",
     "make_schema_example",
     "read_hardness_index_jsonl",
+    "run_downstream_eval",
     "score_lm",
     "score_mc",
     "score_mc_logprobs",
     "score_schema",
     "score_schema_logprobs",
     "select_hardness_subset",
+    "set_eval_determinism",
     "to_cell_result",
     "to_private_hard_cell_result",
     "write_hardness_index_jsonl",
