@@ -101,11 +101,13 @@ def test_eval_bundle_url_pinned():
     )
 
 
-def test_eval_bundle_sha_is_unset_until_download():
-    """SHA pin is None at B1 foundation; the first commit that downloads
-    the bundle MUST update it (and add a re-hash test against the local
-    mirror) per the B1-D2 protocol."""
-    assert DCLM_EVAL_BUNDLE_SHA256 is None
+def test_eval_bundle_sha_pinned():
+    """SHA pin is FROZEN to the 2026-06-12 download manifest. A mismatch
+    means upstream rotated the bundle; per B1-D2 that requires a paired
+    commit (re-derive provenance, list diffs) — NOT a silent bump."""
+    assert DCLM_EVAL_BUNDLE_SHA256 == (
+        "90a7c19e28ee7a52b4f6e1f87658deb9fde7f63deba2379045bdb1fe9ea5d200"
+    )
 
 
 # ----------------------------------------------------------------------------

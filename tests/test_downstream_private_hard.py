@@ -114,7 +114,7 @@ def test_hf_dataset_ids_pin_canonical_paths():
     a repo, this test must be updated in lock-step with the loader."""
     assert HF_DATASET_IDS["arc_challenge_hard"] == ("allenai/ai2_arc", "ARC-Challenge")
     assert HF_DATASET_IDS["winogrande_hard"] == ("allenai/winogrande", "winogrande_xl")
-    assert HF_DATASET_IDS["tiny_arc"] == ("tinyBenchmarks/tinyArc", None)
+    assert HF_DATASET_IDS["tiny_arc"] == ("tinyBenchmarks/tinyAI2_arc", None)
     assert HF_DATASET_IDS["tiny_mmlu"] == ("tinyBenchmarks/tinyMMLU", None)
 
 

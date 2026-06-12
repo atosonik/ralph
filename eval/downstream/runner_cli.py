@@ -175,8 +175,9 @@ def _import_karpa_model(karpa_root: Path | None):
     """
     if karpa_root is not None:
         sys.path.insert(0, str(karpa_root.resolve()))
-    import karpa_bootstrap  # noqa: F401  (side-effect import)
     from model import KarpaBase, KarpaConfig  # type: ignore
+
+    import karpa_bootstrap  # noqa: F401  (side-effect import)
     return KarpaBase, KarpaConfig
 
 

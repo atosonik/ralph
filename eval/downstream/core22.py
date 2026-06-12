@@ -484,10 +484,10 @@ def load_task_examples(
             )
         else:
             raise FileNotFoundError(
-                f"CORE-22 task file not found under {bundle_dir} "
-                f"(searched flat + recursive). The bundle download "
-                f"(URL {DCLM_EVAL_BUNDLE_URL}) must place per-task "
-                f"JSONLs under the supplied bundle_dir."
+                f"CORE-22 task file {task_name}.jsonl not found under "
+                f"{bundle_dir} (searched flat + recursive). The bundle "
+                f"download (URL {DCLM_EVAL_BUNDLE_URL}) must place "
+                f"per-task JSONLs under the supplied bundle_dir."
             )
 
     spec = TASK_SPECS[task_name]
