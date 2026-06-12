@@ -236,6 +236,37 @@ def test_eval_private_calibration_blocked():
     )
 
 
+# ----------------------------------------------------------------------------
+# C1-LITE: validator/state/ + validator/cache/ globs for v0.11-lite lineage.
+# ----------------------------------------------------------------------------
+
+
+def test_validator_state_lineage_blocked():
+    """A patch touching validator/state/lineage_state.json is rejected."""
+    diff = _diff_touching("validator/state/lineage_state.json")
+    assert "validator/state/lineage_state.json" in scan_diff_for_restricted(
+        diff, LIVE_RESTRICTED + ["validator/state/**", "validator/cache/**"],
+    )
+
+
+def test_validator_cache_parent_blocked():
+    """A patch touching validator/cache/parent_reproductions/ is rejected."""
+    diff = _diff_touching("validator/cache/parent_reproductions/abc.json")
+    assert "validator/cache/parent_reproductions/abc.json" in scan_diff_for_restricted(
+        diff, LIVE_RESTRICTED + ["validator/state/**", "validator/cache/**"],
+    )
+
+
+def test_c1_lite_globs_present_in_live_yaml():
+    """validator/state/** and validator/cache/** must be in the live yaml."""
+    yaml_path = Path(__file__).resolve().parent.parent / "restricted_files.yaml"
+    text = yaml_path.read_text()
+    for glob in ("validator/state/**", "validator/cache/**"):
+        assert f'"{glob}"' in text, (
+            f"C1-LITE glob {glob!r} missing from restricted_files.yaml"
+        )
+
+
 def test_b1_d10_explicit_globs_present_in_live_yaml():
     """Read the live restricted_files.yaml and verify the B1-D10 globs
     are recorded. Catches accidental removals."""

@@ -279,6 +279,8 @@ class BittensorChain(ChainInterface):
             crowned_at=d.get("crowned_at", 0.0),
             proof_dir=d.get("proof_dir"),
             previous_king=d.get("previous_king"),
+            king_attestation_hash=d.get("king_attestation_hash", ""),
+            parent_king_attestation_hash=d.get("parent_king_attestation_hash"),
         )
 
     def set_king(self, king: KingRecord) -> None:
@@ -302,6 +304,12 @@ class BittensorChain(ChainInterface):
         }
         if king.previous_king:
             d["previous_king"] = king.previous_king
+        # v0.11-lite lineage fields. Omitted when empty/None for legacy
+        # byte-equivalent serialization.
+        if king.king_attestation_hash:
+            d["king_attestation_hash"] = king.king_attestation_hash
+        if king.parent_king_attestation_hash is not None:
+            d["parent_king_attestation_hash"] = king.parent_king_attestation_hash
         (self.chain_dir / "king.json").write_text(json.dumps(d, indent=2, sort_keys=True))
 
     # ---- Audit / blacklist ----

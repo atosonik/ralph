@@ -31,6 +31,12 @@ restricted_paths:
   # in case a miner's patch tries to include it.
   - "validator/**"
 
+  # v0.11-lite lineage state (C1-LITE) — the per-validator state file +
+  # parent-CSDP-reproduction cache directory. Miner-side patches that touch
+  # these would let a miner forge cached parent-CSDP payloads for free.
+  - "validator/state/**"
+  - "validator/cache/**"
+
   # Proof-test runner — same reasoning.
   - "proof/**"
 

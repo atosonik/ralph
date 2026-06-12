@@ -85,6 +85,8 @@ class LocalChain(ChainInterface):
             crowned_at=d.get("crowned_at", 0.0),
             proof_dir=d.get("proof_dir"),
             previous_king=d.get("previous_king"),
+            king_attestation_hash=d.get("king_attestation_hash", ""),
+            parent_king_attestation_hash=d.get("parent_king_attestation_hash"),
         )
 
     def set_king(self, king: KingRecord) -> None:
@@ -99,6 +101,12 @@ class LocalChain(ChainInterface):
         }
         if king.previous_king:
             d["previous_king"] = king.previous_king
+        # v0.11-lite lineage fields. Omitted from JSON when empty/None to
+        # keep legacy king.json byte-equivalent for pre-v0.11 callers.
+        if king.king_attestation_hash:
+            d["king_attestation_hash"] = king.king_attestation_hash
+        if king.parent_king_attestation_hash is not None:
+            d["parent_king_attestation_hash"] = king.parent_king_attestation_hash
         (self.chain_dir / "king.json").write_text(json.dumps(d, indent=2, sort_keys=True))
 
     def append_event(self, event: dict) -> None:

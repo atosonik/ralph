@@ -26,6 +26,22 @@ class HandshakeRecord:
 
 @dataclass
 class KingRecord:
+    """One king's record on the chain.
+
+    v0.11-lite lineage fields:
+      * `king_attestation_hash` — the king's OWN attestation hash (64-char
+        lowercase hex, sha256 of canonical attestation payload). The
+        primary cryptographic identifier for lineage chaining. Defaults
+        to "" for legacy / pre-v0.11 records.
+      * `parent_king_attestation_hash` — the prior king's attestation
+        hash that this king built on top of. None at genesis. Replaces
+        the v0.10 nested `previous_king` dict with a flat 64-char hex
+        pointer that's cheap to verify and chain-walk.
+
+    `previous_king` is retained for v0.10 byte-equivalent legacy
+    serialization but is NOT consulted by v0.11 lineage verification.
+    """
+
     miner_hotkey: str
     bundle_hash: str
     val_bpb: float
@@ -34,6 +50,8 @@ class KingRecord:
     crowned_at: float
     proof_dir: Optional[str] = None
     previous_king: Optional[dict] = None
+    king_attestation_hash: str = ""
+    parent_king_attestation_hash: Optional[str] = None
 
 
 class ChainInterface(ABC):

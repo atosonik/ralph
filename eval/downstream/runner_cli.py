@@ -61,7 +61,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import torch
@@ -216,6 +219,47 @@ def _build_tokenize_fn():
     return lambda text: enc.encode(text)
 
 
+def _apply_patch_to_workdir(patch_path: Path, karpa_root: Path) -> Path:
+    """Copy `karpa_root` to a tmp workdir + apply `patch_path` via `patch -p1`.
+
+    Returns the path of the patched workdir. The caller adds it to
+    `sys.path` so `import model` resolves to the PATCHED model package.
+
+    Empty patches are tolerated (no-op canonical baseline). Patch failures
+    raise RuntimeError with the patch tool's stdout+stderr; partial
+    application is not allowed (`--no-backup-if-mismatch`).
+
+    Closes B1-D13 in full.
+    """
+    karpa_root = karpa_root.resolve()
+    patch_path = patch_path.resolve()
+    if not karpa_root.exists():
+        raise FileNotFoundError(f"karpa_root not found: {karpa_root}")
+    if not patch_path.exists():
+        raise FileNotFoundError(f"patch not found: {patch_path}")
+    workdir = Path(tempfile.mkdtemp(prefix="karpa_patched_"))
+    # Copy the karpa root into the workdir. We use a child dir so
+    # `workdir` itself is a clean container and can be cleaned up
+    # whole-tree on completion.
+    target = workdir / "karpa_root"
+    shutil.copytree(karpa_root, target, symlinks=True)
+    if patch_path.stat().st_size == 0:
+        # Empty patch == canonical baseline. Nothing to do.
+        return target
+    result = subprocess.run(
+        ["patch", "-p1", "-i", str(patch_path), "--no-backup-if-mismatch"],
+        cwd=target,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"patch failed (rc={result.returncode}):\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return target
+
+
 def main(argv: list[str] | None = None) -> int:
     """Subprocess entrypoint. Returns the process exit code.
 
@@ -234,16 +278,21 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = _build_parser().parse_args(argv)
 
-    if args.patch is not None:
-        raise NotImplementedError(
-            "Structural-patch application is deferred to the apply_patch "
-            "follow-up PR per DEFERRED.md B1-D13. The --patch + --karpa-root "
-            "args are accepted at the CLI surface so the contract is stable; "
-            "full integration is a separate deliverable. Submissions without "
-            "a structural patch should not pass --patch."
-        )
-
     config = EvalConfig.from_dict(json.loads(args.config.read_text()))
+
+    # Structural-patch handling (closes B1-D13): if --patch is supplied, apply
+    # it to a tmp copy of --karpa-root and import the model package from the
+    # patched workdir. Without --patch, _import_karpa_model uses the karpa
+    # root as-is (sys.path insert + `from model import ...`).
+    if args.patch is not None:
+        if args.karpa_root is None:
+            raise ValueError(
+                "--patch requires --karpa-root so the patched recipe tree "
+                "has a base to patch against"
+            )
+        patched_workdir = _apply_patch_to_workdir(args.patch, args.karpa_root)
+        # Re-route the model import to the patched workdir.
+        sys.path.insert(0, str(patched_workdir))
 
     KarpaBase, KarpaConfig = _import_karpa_model(args.karpa_root)
     ckpt_config, state_dict = _load_checkpoint(args.checkpoint)

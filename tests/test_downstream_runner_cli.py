@@ -229,10 +229,13 @@ class TestBuildTaskLoaders:
 
 
 class TestMainPatchHandling:
-    def test_patch_arg_raises_not_implemented(self, tmp_path):
+    def test_patch_with_missing_files_raises_filenotfound(self, tmp_path):
+        """C1-LITE: --patch is now fully wired. Bogus paths surface as
+        FileNotFoundError from _apply_patch_to_workdir, NOT
+        NotImplementedError."""
         cfg_path = tmp_path / "cfg.json"
         cfg_path.write_text(json.dumps({"tasks": ["arc_easy"]}))
-        with pytest.raises(NotImplementedError) as exc_info:
+        with pytest.raises(FileNotFoundError):
             main([
                 "--checkpoint", "x",
                 "--config", str(cfg_path),
@@ -243,9 +246,6 @@ class TestMainPatchHandling:
                 "--patch", "/tmp/p.patch",
                 "--karpa-root", "/tmp/root",
             ])
-        msg = str(exc_info.value)
-        assert "Structural-patch" in msg or "structural-patch" in msg.lower()
-        assert "B1-D13" in msg
 
     def test_no_patch_passes_through(self, tmp_path):
         """Without --patch, main() proceeds past the gate (fails later for
