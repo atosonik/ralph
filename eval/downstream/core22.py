@@ -469,11 +469,26 @@ def load_task_examples(
     bundle_dir = Path(bundle_dir)
     path = bundle_dir / f"{task_name}.jsonl"
     if not path.exists():
-        raise FileNotFoundError(
-            f"CORE-22 task file not found: {path}. The bundle download "
-            f"(URL {DCLM_EVAL_BUNDLE_URL}) must place per-task JSONLs "
-            "under the supplied bundle_dir."
-        )
+        # DCLM bundle layout nests tasks in category subdirs
+        # (eval_bundle/eval_data/{category}/{task}.jsonl). Walk the tree
+        # so callers can pass either the flat-mirror dir or the raw
+        # upstream bundle root and have lookups still resolve.
+        candidates = sorted(bundle_dir.rglob(f"{task_name}.jsonl"))
+        if len(candidates) == 1:
+            path = candidates[0]
+        elif len(candidates) > 1:
+            raise ValueError(
+                f"ambiguous task file location for {task_name!r}: "
+                f"{[str(c) for c in candidates]}. Flatten the bundle "
+                "or pass a more specific bundle_dir."
+            )
+        else:
+            raise FileNotFoundError(
+                f"CORE-22 task file not found under {bundle_dir} "
+                f"(searched flat + recursive). The bundle download "
+                f"(URL {DCLM_EVAL_BUNDLE_URL}) must place per-task "
+                f"JSONLs under the supplied bundle_dir."
+            )
 
     spec = TASK_SPECS[task_name]
     raw_rows = _read_jsonl(path)

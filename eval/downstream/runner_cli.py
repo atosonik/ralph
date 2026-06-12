@@ -163,17 +163,19 @@ def _import_karpa_model(karpa_root: Path | None):
     """Inject the recipe path into sys.path and import KarpaBase + Config.
 
     If `karpa_root` is provided, prepend it to sys.path so a patched
-    `model/` package wins over any installed one. Otherwise import
-    `karpa_bootstrap` from the karpa repo (already on sys.path via
-    the subprocess wrapper's PYTHONPATH) which injects the sibling
-    `../recipe` per its resolution order.
+    `model/` package wins over any installed one. We then ALWAYS run
+    `karpa_bootstrap` (which resolves the sibling `../recipe` clone)
+    so that the unpatched canonical recipe path is on sys.path as a
+    fallback — without this, `--karpa-root` mode crashed with
+    `ModuleNotFoundError: No module named 'model'` because the karpa
+    repo itself has no `model/` package; that lives in the recipe
+    sibling per `karpa_bootstrap.py`'s resolution order.
 
     Returns: (KarpaBase, KarpaConfig) classes.
     """
     if karpa_root is not None:
         sys.path.insert(0, str(karpa_root.resolve()))
-    else:
-        import karpa_bootstrap  # noqa: F401  (side-effect import)
+    import karpa_bootstrap  # noqa: F401  (side-effect import)
     from model import KarpaBase, KarpaConfig  # type: ignore
     return KarpaBase, KarpaConfig
 
