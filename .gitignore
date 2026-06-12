@@ -110,3 +110,33 @@ twitter_posts/
 
 # Per-agent state (memory, prompts, runs, lockfiles) — never tracked
 agents/
+
+# --- Internal dev / planning — NEVER committed to public repo ---
+
+# Claude Code project skills + settings (local to user, not protocol)
+.claude/
+
+# Run plans and one-off planning docs at any depth
+RUN_PLAN_*.md
+PLAN_*.md
+/RUN_PLAN.md
+/PLAN.md
+
+# Local experiment scratch space (training-shaped scratch, notes, refs)
+experiments/
+
+# Local dev/strategy/review docs under docs/ — keep public docs (whitepaper,
+# results, runbooks) committed; everything below stays local.
+/docs/rearch_*/
+/docs/build_scope/
+/docs/dashboard_design/
+/docs/direction_reframe/
+/docs/king_criteria_v2/
+/docs/king_criterion_review/
+/docs/proxy_validation_experiment/
+
+# GitHub Discussion drafts — local only, never committed
+github_discussions/
+
+# Untracked scripts that are personal-dev (e.g. retrospectives)
+/scripts/retrospective_*.py
