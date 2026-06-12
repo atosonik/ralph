@@ -138,5 +138,8 @@ experiments/
 # GitHub Discussion drafts — local only, never committed
 github_discussions/
 
+# Outbound email drafts — local only, never committed
+outbound/
+
 # Untracked scripts that are personal-dev (e.g. retrospectives)
 /scripts/retrospective_*.py
