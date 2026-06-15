@@ -154,4 +154,4 @@ Requires an H100 GPU. The script handles everything: venv, dependencies, data pr
 
 🔗 **Repo:** [github.com/RalphLabsAI/ralph](https://github.com/RalphLabsAI/ralph)
 🏷️ **This milestone:** [`v0.5.0`](https://github.com/RalphLabsAI/ralph/releases/tag/v0.5.0) — exact code snapshot for this phase
-📄 **Whitepaper:** v1.2 (current)
+📄 **Whitepaper:** v1.3 (current)

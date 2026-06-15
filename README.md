@@ -11,7 +11,7 @@
 <p align="center">
   🟢 <b><a href="https://taostats.io/subnets/40">Live on mainnet — netuid 40</a></b> ·
   🌐 <a href="https://ralphlabs.ai">ralphlabs.ai</a> ·
-  📄 <a href="docs/Ralph-Whitepaper-v1.2.pdf">Whitepaper v1.2</a> ·
+  📄 <a href="docs/Ralph-Whitepaper-v1.3.pdf">Whitepaper v1.3</a> ·
   🏷️ <a href="https://github.com/RalphLabsAI/ralph/releases">Releases</a> ·
   📊 <a href="https://wandb.ai/ralphlabs-hub/ralph">Wandb</a> ·
   💬 <a href="https://github.com/orgs/RalphLabsAI/discussions">Discussions</a>
@@ -64,7 +64,7 @@ The open question this design hinges on: **does a cheap small-scale gate actuall
 
 ## Credibility — attested execution
 
-A score is only worth the execution behind it. Ralph v1.2 (§5.4) replaces the earlier two-tier (verified / unverified) split with a **single attested-execution tier**: every scored run is produced by the official proof-test container under hardware attestation (NVIDIA Confidential Computing — TDX + nvtrust), so a reported number always corresponds to a run that provably happened as described, not a self-report. Validators stay cheap — they supervise and select; miners pay the GPU cost.
+A score is only worth the execution behind it. Ralph v1.3 (§5.4) replaces the earlier two-tier (verified / unverified) split with a **single attested-execution tier**: every scored run is produced by the official proof-test container under hardware attestation (NVIDIA Confidential Computing — TDX + nvtrust), so a reported number always corresponds to a run that provably happened as described, not a self-report. Validators stay cheap — they supervise and select; miners pay the GPU cost.
 
 ## Current status
 
