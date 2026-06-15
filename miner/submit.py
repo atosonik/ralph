@@ -28,19 +28,19 @@ from pathlib import Path
 # Phase 0.5+ replaces this with Bittensor on-chain commitment.
 
 
-def _chain_dir(karpa_root: Path) -> Path:
-    d = karpa_root / "chain"
+def _chain_dir(ralph_root: Path) -> Path:
+    d = ralph_root / "chain"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def request_handshake_nonce(
-    karpa_root: Path,
+    ralph_root: Path,
     miner_hotkey: str,
     patch_hash: str,
 ) -> str:
     """Simulate the on-chain proof-test handshake (§5.4)."""
-    chain = _chain_dir(karpa_root)
+    chain = _chain_dir(ralph_root)
     nonce = "0x" + secrets.token_hex(32)
     entry = {
         "type": "proof_test_handshake",
@@ -56,11 +56,11 @@ def request_handshake_nonce(
 
 
 def lookup_handshake(
-    karpa_root: Path,
+    ralph_root: Path,
     nonce: str,
 ) -> dict | None:
     """Validator-side: confirm a nonce was committed to the chain."""
-    handshakes = _chain_dir(karpa_root) / "handshakes.jsonl"
+    handshakes = _chain_dir(ralph_root) / "handshakes.jsonl"
     if not handshakes.exists():
         return None
     for line in handshakes.read_text().splitlines():
@@ -78,7 +78,7 @@ def lookup_handshake(
 # Phase 0.5+: replaced by real Bittensor hotkey signing (substrate sr25519).
 
 
-def _ensure_keypair(karpa_root: Path, miner_hotkey: str) -> tuple[bytes, bytes]:
+def _ensure_keypair(ralph_root: Path, miner_hotkey: str) -> tuple[bytes, bytes]:
     """Return (private_key_bytes, public_key_bytes). Generates and persists on
     first use."""
     try:
@@ -96,7 +96,7 @@ def _ensure_keypair(karpa_root: Path, miner_hotkey: str) -> tuple[bytes, bytes]:
         raise RuntimeError("install `cryptography` for Phase 0 signer support") from None
 
     import os as _os
-    keys_dir = karpa_root / "miner" / "keys"
+    keys_dir = ralph_root / "miner" / "keys"
     keys_dir.mkdir(parents=True, exist_ok=True)
     try:
         keys_dir.chmod(0o700)
@@ -159,7 +159,7 @@ def _signed_payload(
 
 
 def sign_submission(
-    karpa_root: Path,
+    ralph_root: Path,
     miner_hotkey: str,
     bundle_hash: str,
     handshake_nonce: str,
@@ -174,7 +174,7 @@ def sign_submission(
     """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-    sk_bytes, pk_bytes = _ensure_keypair(karpa_root, miner_hotkey)
+    sk_bytes, pk_bytes = _ensure_keypair(ralph_root, miner_hotkey)
     sk = Ed25519PrivateKey.from_private_bytes(sk_bytes)
     payload = _signed_payload(miner_hotkey, handshake_nonce, bundle_hash, hypothesis)
     sig = sk.sign(payload)
@@ -231,7 +231,7 @@ class SubmissionBundle:
 
 
 def assemble_submission(
-    karpa_root: Path,
+    ralph_root: Path,
     miner_hotkey: str,
     submission_dir: Path,
     proof_dir: Path,
@@ -243,7 +243,7 @@ def assemble_submission(
     manifest = json.loads((proof_dir / "bundle_manifest.json").read_text())
     bundle_hash = manifest["bundle_hash"]
     handshake_nonce = manifest["handshake_nonce"]
-    sig = sign_submission(karpa_root, miner_hotkey, bundle_hash, handshake_nonce)
+    sig = sign_submission(ralph_root, miner_hotkey, bundle_hash, handshake_nonce)
 
     bundle = SubmissionBundle(
         miner_hotkey=miner_hotkey,
@@ -270,7 +270,7 @@ def main() -> None:
 
     p = argparse.ArgumentParser()
     p.add_argument("command", choices=["handshake", "assemble"])
-    p.add_argument("--karpa-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--ralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--miner-hotkey", required=True)
     p.add_argument("--patch", type=Path, help="patch file (for handshake)")
     p.add_argument("--submission-dir", type=Path)
@@ -283,11 +283,11 @@ def main() -> None:
             if args.patch and args.patch.exists()
             else hashlib.sha256(b"").hexdigest()
         )
-        nonce = request_handshake_nonce(args.karpa_root, args.miner_hotkey, patch_hash)
+        nonce = request_handshake_nonce(args.ralph_root, args.miner_hotkey, patch_hash)
         print(nonce)
     elif args.command == "assemble":
         bundle = assemble_submission(
-            args.karpa_root,
+            args.ralph_root,
             args.miner_hotkey,
             args.submission_dir,
             args.proof_dir,

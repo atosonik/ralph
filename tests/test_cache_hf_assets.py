@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from scripts.cache_hf_assets import (
     TASK_CONVERTERS,
     _build_parser,
@@ -236,7 +236,7 @@ def test_cache_one_task_unknown_task_raises(tmp_path):
 def test_cache_all_writes_manifest(tmp_path, monkeypatch):
     _mock_load_hf(monkeypatch, [])
     manifest = cache_all(output_dir=tmp_path / "out", tasks=("arc_challenge_hard",))
-    assert manifest["_meta"] == "karpa-private-hard-cache-manifest"
+    assert manifest["_meta"] == "ralph-private-hard-cache-manifest"
     assert manifest["version"] == "v1"
     assert len(manifest["tasks"]) == 1
     on_disk = json.loads((tmp_path / "out" / "manifest.json").read_text())

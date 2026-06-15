@@ -1,6 +1,6 @@
 """
 RESTRICTED. The calibration harness is the hardware-independence anchor for
-Karpa's scoring (whitepaper §5.5). Miners may not patch any file here.
+Ralph's scoring (whitepaper §5.5). Miners may not patch any file here.
 """
 
 from .benchmark import CalibrationResult, run_calibration

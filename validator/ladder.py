@@ -13,7 +13,7 @@ PR goes through two phases here:
   `DownstreamReport`s into a single combined report and produces a
   `HiddenEvalResult` with `downstream` populated. Honors a `mode='legacy'`
   flag that skips the v0.11 downstream path entirely so the
-  `to_legacy_dict()` byte-equivalence under `KARPA_KING_RULE=legacy` is
+  `to_legacy_dict()` byte-equivalence under `RALPH_KING_RULE=legacy` is
   preserved bit-for-bit.
 
 What this module ships:
@@ -56,7 +56,7 @@ from pathlib import Path
 from typing import Optional
 
 from chain_layer.interface import ChainInterface
-from eval.downstream.runner import KARPA_VOCAB_SIZE, EvalConfig
+from eval.downstream.runner import RALPH_VOCAB_SIZE, EvalConfig
 from eval.downstream.runner_subprocess import (
     EvalSubprocessError,
     run_eval_in_subprocess,
@@ -234,7 +234,7 @@ def accept_submission(
     Checks (in order, fail-fast):
       1. schema_version ∈ SUPPORTED_SCHEMA_VERSIONS
       2. branch_id well-formed
-      3. vocab_size == KARPA_VOCAB_SIZE (50257)
+      3. vocab_size == RALPH_VOCAB_SIZE (50257)
       4. parent_king_attestation_hash format (if non-empty)
       5. verify_parent_lineage (signature + age + parent existence)
 
@@ -294,7 +294,7 @@ def _run_preflight(
             submission_dict=submission.to_dict(),
         )
 
-    if submission.vocab_size != KARPA_VOCAB_SIZE:
+    if submission.vocab_size != RALPH_VOCAB_SIZE:
         return LadderAcceptResult(
             accepted=False,
             reason=REJECT_VOCAB_MISMATCH,
@@ -559,7 +559,7 @@ def run_ladder_eval(
     config: LadderEvalConfig,
     *,
     checkpoint_path: Path,
-    karpa_root: Path,
+    ralph_root: Path,
     patch_path: Optional[Path] = None,
     mode: str = EVAL_MODE_V011,
     command_prefix: Optional[Sequence[str]] = None,
@@ -579,7 +579,7 @@ def run_ladder_eval(
       config: `LadderEvalConfig` (typically from
         `LadderEvalConfig.standard_s1_s2_s3(...)`).
       checkpoint_path: miner-submitted checkpoint to evaluate.
-      karpa_root: karpa repo root for `from model import ...` resolution
+      ralph_root: ralph repo root for `from model import ...` resolution
         + structural-patch base.
       patch_path: optional structural patch (passed through to runner_cli).
       mode: `EVAL_MODE_V011` (default) or `EVAL_MODE_LEGACY`.
@@ -646,10 +646,10 @@ def run_ladder_eval(
             config=eval_config,
             bundle_sha256=config.bundle_sha256,
             bundle_dir=config.bundle_dir,
-            vocab_size=KARPA_VOCAB_SIZE,
+            vocab_size=RALPH_VOCAB_SIZE,
             hardness_index_path=config.hardness_index_path,
             patch_path=patch_path,
-            karpa_root=karpa_root,
+            ralph_root=ralph_root,
             timeout_s=timeout_s_per_rung,
             command_prefix=command_prefix,
         )

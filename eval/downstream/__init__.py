@@ -1,4 +1,4 @@
-"""Karpa downstream-eval harness (B1).
+"""Ralph downstream-eval harness (B1).
 
 RESTRICTED: this package is part of the validator-controlled eval surface.
 Miner-submitted patches must not modify any file under eval/downstream/ — the
@@ -25,7 +25,7 @@ What B1 has shipped so far:
   * runner_subprocess.py: caller-side subprocess wrapper +
     EvalSubprocessError + JSON IPC contract
   * runner_cli.py: production CLI entrypoint — argparse +
-    `torch.load(weights_only=True)` checkpoint load + KarpaBase
+    `torch.load(weights_only=True)` checkpoint load + RalphBase
     model construction + tiktoken GPT-2 BPE tokenizer wiring +
     structural-patch CLI args (B1-D5, B1-D13 closed)
   * calibration.py: aggregate_noise_floors + per-cell stddev
@@ -84,7 +84,7 @@ from .private_hard import (
     to_private_hard_cell_result,
 )
 from .runner import (
-    KARPA_VOCAB_SIZE,
+    RALPH_VOCAB_SIZE,
     EvalConfig,
     check_vocab_compatibility,
     run_downstream_eval,
@@ -136,7 +136,7 @@ __all__ = [
     "HF_DATASET_IDS",
     "HardnessIndex",
     "HardnessIndexRow",
-    "KARPA_VOCAB_SIZE",
+    "RALPH_VOCAB_SIZE",
     "LMExample",
     "LMRawRow",
     "MCExample",

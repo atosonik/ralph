@@ -180,7 +180,7 @@ def _get_tdx_quote(nonce: str, user_data: str) -> tuple[Optional[str], Optional[
         tdx_dev = "/dev/tdx-guest" if os.path.exists("/dev/tdx-guest") else "/dev/tdx_guest"
         # The tdx-guest device expects a specific ioctl; for now we use the
         # configfs-tsm interface which is more portable across kernel versions.
-        tsm_path = "/sys/kernel/config/tsm/report/karpa"
+        tsm_path = "/sys/kernel/config/tsm/report/ralph"
         os.makedirs(tsm_path, exist_ok=True)
         with open(f"{tsm_path}/inblob", "wb") as f:
             f.write(report_data[:64].ljust(64, b"\0"))
@@ -336,17 +336,17 @@ def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
     Until the NRAS JWKS verification is wired (TODO: real_nvcc_only on real
     H100-CC silicon), this function REFUSES verified-tier attestation. To
     allow a loud-warning mock-style acceptance on testnet, set the env var
-    KARPA_ALLOW_REAL_ATTEST_STUB=1 — but never set this on mainnet.
+    RALPH_ALLOW_REAL_ATTEST_STUB=1 — but never set this on mainnet.
     """
     import os as _os
     if not token:
         return False, "empty GPU token"
-    if _os.environ.get("KARPA_ALLOW_REAL_ATTEST_STUB") == "1":
+    if _os.environ.get("RALPH_ALLOW_REAL_ATTEST_STUB") == "1":
         # Loud-warning stub for testnet only. The NRAS signature is not
         # verified; the nonce binding is best-effort.
         import sys as _sys
         print(
-            "[attest] WARNING: KARPA_ALLOW_REAL_ATTEST_STUB=1 — accepting "
+            "[attest] WARNING: RALPH_ALLOW_REAL_ATTEST_STUB=1 — accepting "
             "real_* attestation without NRAS JWKS signature verification. "
             "MUST NOT BE SET ON MAINNET.",
             file=_sys.stderr,
@@ -375,7 +375,7 @@ def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
     return False, (
         "GPU token signature verification not implemented. "
         "Wire NRAS JWKS verification before accepting real_nvcc_only "
-        "attestation, or set KARPA_ALLOW_REAL_ATTEST_STUB=1 (testnet only)."
+        "attestation, or set RALPH_ALLOW_REAL_ATTEST_STUB=1 (testnet only)."
     )
 
 
@@ -388,16 +388,16 @@ def verify_tdx_quote(quote_hex: str, expected_nonce: str, expected_measurement: 
     report_data == sha256(nonce || user_data). Any 256-byte blob passed.
 
     Until libtdx-attest / trustauthority-py is wired in, this function
-    REFUSES TDX quote acceptance. Set KARPA_ALLOW_REAL_ATTEST_STUB=1 to
+    REFUSES TDX quote acceptance. Set RALPH_ALLOW_REAL_ATTEST_STUB=1 to
     re-enable the loose check on testnet only.
     """
     import os as _os
     if not quote_hex:
         return False, "empty TDX quote"
-    if _os.environ.get("KARPA_ALLOW_REAL_ATTEST_STUB") == "1":
+    if _os.environ.get("RALPH_ALLOW_REAL_ATTEST_STUB") == "1":
         import sys as _sys
         print(
-            "[attest] WARNING: KARPA_ALLOW_REAL_ATTEST_STUB=1 — accepting "
+            "[attest] WARNING: RALPH_ALLOW_REAL_ATTEST_STUB=1 — accepting "
             "TDX quote without Intel signature chain verification. "
             "MUST NOT BE SET ON MAINNET.",
             file=_sys.stderr,
@@ -414,7 +414,7 @@ def verify_tdx_quote(quote_hex: str, expected_nonce: str, expected_measurement: 
         "TDX quote verification not implemented. Wire libtdx-attest or "
         "trustauthority-py to check Intel signature chain, RTMRs against "
         "expected_measurement, and report_data == sha256(nonce||user_data). "
-        "Or set KARPA_ALLOW_REAL_ATTEST_STUB=1 (testnet only)."
+        "Or set RALPH_ALLOW_REAL_ATTEST_STUB=1 (testnet only)."
     )
 
 

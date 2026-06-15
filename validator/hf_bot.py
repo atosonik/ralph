@@ -1,4 +1,4 @@
-"""Validator-side merge of winning HF PRs on karpaai/proof-bundles.
+"""Validator-side merge of winning HF PRs on RalphLabsAI/proof-bundles.
 
 Mirrors validator/github_bot.py but for HuggingFace dataset PRs. The miner
 opens a community PR via `create_pr=True`; on king change the bot merges it
@@ -7,8 +7,8 @@ so the canonical bundle ends up on `main`.
 Requires an HF token with merge rights on the dataset (org admin / write
 collaborator). For testnet we can reuse the validator's own HF_TOKEN if the
 operator's account is the org admin; for cleaner separation set
-KARPA_BOT_HF_TOKEN to a token from a dedicated karpa-bot HF account that's
-a Write member of the karpaai org.
+RALPH_BOT_HF_TOKEN to a token from a dedicated ralph-bot HF account that's
+a Write member of the RalphLabsAI org.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def merge_pr(
         api.merge_pull_request(
             repo_id=repo_id, repo_type="dataset",
             discussion_num=pr_num,
-            comment=comment or "Auto-merged by Karpa validator (king crowned).",
+            comment=comment or "Auto-merged by Ralph validator (king crowned).",
         )
         return HfMergeResult(pr_num=pr_num, merged=True, detail="merged")
     except Exception as e:

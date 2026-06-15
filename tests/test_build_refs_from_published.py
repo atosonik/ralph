@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from scripts.analyze_b6_rho import PINNED_REFERENCES
 from scripts.build_refs_from_published import _summary, build_refs, main
 

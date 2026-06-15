@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream import (
     BPB_SUFFIX,
     HARNESS_VERSION,

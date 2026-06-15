@@ -1,43 +1,43 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Karpa Phase 0.5 — H100 bootstrap script
+# Ralph Phase 0.5 — H100 bootstrap script
 #
 # Run this on a fresh H100 VM from Shadeform (Lambda, Latitude, etc.).
-# It does everything: clone → install → data prep → noise floor → Karpa-1.
+# It does everything: clone → install → data prep → noise floor → Ralph-1.
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/karpaai/karpa/main/scripts/run_h100.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/RalphLabsAI/ralph/main/scripts/run_h100.sh | bash
 #
 #   Or, if you've already cloned:
-#   cd karpa && bash scripts/run_h100.sh
+#   cd ralph && bash scripts/run_h100.sh
 #
 # Expected wall-clock:
 #   Data prep (~1B tokens):  ~10-20 min
 #   Noise floor (10 seeds):  ~30 min  (proxy config, 500 steps each)
-#   Karpa-1 training:   ~35 min  (default config, 2000 steps)
+#   Ralph-1 training:   ~35 min  (default config, 2000 steps)
 #   Total:                   ~60-90 min
 #
 # Output:
 #   runs/h100_noise_floor/noise_floor_summary.json  — empirical noise floor
-#   runs/h100_karpa1/                          — Karpa-1 checkpoint + logs
+#   runs/h100_ralph1/                          — Ralph-1 checkpoint + logs
 #   runs/h100_calibration/calibration.json          — H100 reference timings
 # ============================================================================
 
 set -euo pipefail
 
-REPO_URL="git@github-bitzic:karpaai/karpa.git"
-WORKDIR="${KARPA_DIR:-$HOME/karpa}"
+REPO_URL="git@github-bitzic:RalphLabsAI/ralph.git"
+WORKDIR="${RALPH_DIR:-$HOME/ralph}"
 DATA_TOKENS="${DATA_TOKENS:-1000000000}"        # 1B training tokens
 EVAL_TOKENS="${EVAL_TOKENS:-5000000}"           # 5M eval tokens
 NOISE_RUNS="${NOISE_RUNS:-10}"
-KARPA1_SEED="${KARPA1_SEED:-1337}"
+RALPH1_SEED="${RALPH1_SEED:-1337}"
 # Implements the v1.1 two-tier model (verified α=1.0 / unverified α=0.5).
 # Whitepaper v1.2 §5.4 retires this in favour of a single attested-execution
 # tier — code rewrite pending; see docs/whitepaper_v1.2_updates.md §B.2.
 TIER="${TIER:-unverified}"
 
 echo "=============================================="
-echo "  Karpa Phase 0.5 — H100 Bootstrap"
+echo "  Ralph Phase 0.5 — H100 Bootstrap"
 echo "=============================================="
 
 # --- Step 0: Clone if needed ---
@@ -92,12 +92,12 @@ python scripts/noise_floor.py \
     --config configs/h100_proxy.json \
     --out-dir runs/h100_noise_floor
 
-# --- Step 5: Karpa-1 training ---
-echo "[5/5] Training Karpa-1 (300M params, ~262M tokens)..."
+# --- Step 5: Ralph-1 training ---
+echo "[5/5] Training Ralph-1 (300M params, ~262M tokens)..."
 python -m recipe.train \
     --config configs/h100_default.json \
-    --out-dir runs/h100_karpa1 \
-    --seed "$KARPA1_SEED"
+    --out-dir runs/h100_ralph1 \
+    --seed "$RALPH1_SEED"
 
 # --- Summary ---
 echo ""
@@ -107,7 +107,7 @@ echo "=============================================="
 echo ""
 echo "Calibration:   runs/h100_calibration/calibration.json"
 echo "Noise floor:   runs/h100_noise_floor/noise_floor_summary.json"
-echo "Karpa-1:  runs/h100_karpa1/"
+echo "Ralph-1:  runs/h100_ralph1/"
 echo ""
 
 if [ -f "runs/h100_noise_floor/noise_floor_summary.json" ]; then
@@ -118,19 +118,19 @@ print(f\"Noise floor: mean={nf['val_bpb']['mean']:.4f}  std={nf['val_bpb']['std'
 "
 fi
 
-if [ -f "runs/h100_karpa1/final_state.json" ]; then
+if [ -f "runs/h100_ralph1/final_state.json" ]; then
     python -c "
 import json
-fs = json.load(open('runs/h100_karpa1/final_state.json'))
-print(f\"Karpa-1: final_loss={fs['final_loss']:.4f}  tokens={fs['tokens_seen']:,}  wall={fs['wall_clock_s']:.0f}s\")
+fs = json.load(open('runs/h100_ralph1/final_state.json'))
+print(f\"Ralph-1: final_loss={fs['final_loss']:.4f}  tokens={fs['tokens_seen']:,}  wall={fs['wall_clock_s']:.0f}s\")
 "
 fi
 
 echo ""
 echo "Next steps:"
-echo "  1. Run the hidden eval on Karpa-1:"
+echo "  1. Run the hidden eval on Ralph-1:"
 echo "     python -c \"..."
 echo "  2. Post results to GitHub Discussions"
 echo "  3. Build + test the Docker container:"
-echo "     docker build -t karpa-proof:latest ."
+echo "     docker build -t ralph-proof:latest ."
 echo "  4. (Phase 0.5c) Rent a CC-capable H100 for real TDX+nvtrust attestation"

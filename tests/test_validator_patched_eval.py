@@ -1,6 +1,6 @@
 """Tests for the patched-model fallback in op4_hidden_eval.
 
-When a miner's structural patch adds parameters to KarpaBase, the validator's
+When a miner's structural patch adds parameters to RalphBase, the validator's
 canonical model can't load the resulting checkpoint. validator.py falls back
 to _patched_hidden_eval which applies the patch in a temp workdir and runs
 eval_in_workdir.py as a subprocess so the patched model code scores the
@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval import HiddenEvalResult
 from validator import validator as vmod
 
@@ -29,7 +29,7 @@ from validator import validator as vmod
 
 def test_shape_mismatch_detects_unexpected_key():
     err = RuntimeError(
-        "Error(s) in loading state_dict for KarpaBase:\n"
+        "Error(s) in loading state_dict for RalphBase:\n"
         '\tUnexpected key(s) in state_dict: "blocks.0.attn.q_norm.weight"'
     )
     assert vmod._is_state_dict_shape_mismatch(err) is True
@@ -37,7 +37,7 @@ def test_shape_mismatch_detects_unexpected_key():
 
 def test_shape_mismatch_detects_missing_key():
     err = RuntimeError(
-        'Error(s) in loading state_dict for KarpaBase:\n\tMissing key(s) in state_dict: "extra.bias"'
+        'Error(s) in loading state_dict for RalphBase:\n\tMissing key(s) in state_dict: "extra.bias"'
     )
     assert vmod._is_state_dict_shape_mismatch(err) is True
 
@@ -79,7 +79,7 @@ def test_patched_eval_no_patch_diff_returns_error(tmp_path: Path):
     # NO patch.diff — fallback can't proceed.
 
     ok, detail, result = vmod._patched_hidden_eval(
-        karpa_root=tmp_path,
+        ralph_root=tmp_path,
         proof_dir=proof_dir,
         ckpt_path=proof_dir / "training" / "checkpoint.pt",
     )
@@ -95,7 +95,7 @@ def test_patched_eval_parses_subprocess_result_line(tmp_path: Path):
 
     fake_stdout = (
         "[some debug noise]\n"
-        "KARPA_EVAL_RESULT val_bpb=1.5419 benchmark_acc=0.2500 "
+        "RALPH_EVAL_RESULT val_bpb=1.5419 benchmark_acc=0.2500 "
         "tokens_evaluated=4096 benchmark_examples=32 eval_set_hash=abc123\n"
         "[trailing line]\n"
     )
@@ -110,7 +110,7 @@ def test_patched_eval_parses_subprocess_result_line(tmp_path: Path):
         mock.patch("validator.validator.apply_patch", create=True) if False else mock.patch("proof.runner.apply_patch"),
     ):
         ok, detail, result = vmod._patched_hidden_eval(
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             proof_dir=proof_dir,
             ckpt_path=ckpt_path,
         )
@@ -137,7 +137,7 @@ def test_patched_eval_subprocess_nonzero_exit_returns_error(tmp_path: Path):
         mock.patch("proof.runner.apply_patch"),
     ):
         ok, detail, result = vmod._patched_hidden_eval(
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             proof_dir=proof_dir,
             ckpt_path=ckpt_path,
         )
@@ -161,13 +161,13 @@ def test_patched_eval_missing_result_line_returns_error(tmp_path: Path):
         mock.patch("proof.runner.apply_patch"),
     ):
         ok, detail, result = vmod._patched_hidden_eval(
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             proof_dir=proof_dir,
             ckpt_path=ckpt_path,
         )
 
     assert ok is False
-    assert "KARPA_EVAL_RESULT" in detail
+    assert "RALPH_EVAL_RESULT" in detail
     assert result is None
 
 
@@ -184,7 +184,7 @@ def test_patched_eval_subprocess_timeout_returns_error(tmp_path: Path):
         mock.patch("proof.runner.apply_patch"),
     ):
         ok, detail, result = vmod._patched_hidden_eval(
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             proof_dir=proof_dir,
             ckpt_path=ckpt_path,
         )
@@ -203,7 +203,7 @@ def test_patched_eval_apply_patch_failure_returns_error(tmp_path: Path):
         mock.patch("proof.runner.apply_patch", side_effect=RuntimeError("patch hunk failed")),
     ):
         ok, detail, result = vmod._patched_hidden_eval(
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             proof_dir=proof_dir,
             ckpt_path=ckpt_path,
         )
@@ -219,7 +219,7 @@ def test_patched_eval_apply_patch_failure_returns_error(tmp_path: Path):
 
 
 def test_op4_falls_back_on_shape_mismatch(tmp_path: Path):
-    """When canonical KarpaBase.load_state_dict raises with shape-mismatch
+    """When canonical RalphBase.load_state_dict raises with shape-mismatch
     keywords, op4_hidden_eval must invoke _patched_hidden_eval. This is the
     seam that recovered Agent A's QK-Norm submission from submission_error
     to scoreable."""
@@ -234,7 +234,7 @@ def test_op4_falls_back_on_shape_mismatch(tmp_path: Path):
     }))
 
     canonical_err = RuntimeError(
-        'Error(s) in loading state_dict for KarpaBase:\n'
+        'Error(s) in loading state_dict for RalphBase:\n'
         '\tUnexpected key(s) in state_dict: "blocks.0.attn.q_norm.weight"'
     )
 
@@ -248,7 +248,7 @@ def test_op4_falls_back_on_shape_mismatch(tmp_path: Path):
 
     with (
         mock.patch.object(vmod, "_safe_load_checkpoint_weights", return_value={}),
-        mock.patch.object(vmod.KarpaBase, "load_state_dict", side_effect=canonical_err),
+        mock.patch.object(vmod.RalphBase, "load_state_dict", side_effect=canonical_err),
         mock.patch.object(
             vmod, "_patched_hidden_eval",
             return_value=(True, "val_bpb=1.4321 bench=0.350 (patched-eval)", fallback_result),
@@ -281,7 +281,7 @@ def test_op4_reraises_non_shape_mismatch_runtime_error(tmp_path: Path):
 
     with (
         mock.patch.object(vmod, "_safe_load_checkpoint_weights", return_value={}),
-        mock.patch.object(vmod.KarpaBase, "load_state_dict", side_effect=unrelated_err),
+        mock.patch.object(vmod.RalphBase, "load_state_dict", side_effect=unrelated_err),
         mock.patch.object(vmod, "_patched_hidden_eval") as patched_fn,
     ):
         with pytest.raises(RuntimeError, match="CUDA out of memory"):
@@ -295,22 +295,22 @@ def test_op4_reraises_non_shape_mismatch_runtime_error(tmp_path: Path):
 
 
 def test_op4_canonical_path_end_to_end(tmp_path: Path):
-    """Build a tiny real model + checkpoint that matches canonical KarpaBase
+    """Build a tiny real model + checkpoint that matches canonical RalphBase
     exactly, and verify op4_hidden_eval still runs the canonical branch
     successfully — i.e. the new try/except seam doesn't accidentally route
     healthy submissions through the slow patched-eval subprocess."""
     import torch
-    from model import KarpaBase, KarpaConfig
+    from model import RalphBase, RalphConfig
 
     from eval import run_hidden_eval  # noqa: F401 — used to ensure import works
 
     # vocab_size must cover the eval token range (GPT-2 BPE, max id 50256).
     # Keep everything else tiny so the test stays fast (<2s on CPU).
-    cfg = KarpaConfig(
+    cfg = RalphConfig(
         vocab_size=50304, dim=16, n_layers=1, n_heads=2,
         head_dim=8, ffn_mult=8 / 3, max_seq_len=32,
     )
-    model = KarpaBase(cfg)
+    model = RalphBase(cfg)
     proof_dir = tmp_path / "proof"
     (proof_dir / "training").mkdir(parents=True)
     ckpt_path = proof_dir / "training" / "checkpoint.pt"
@@ -326,7 +326,7 @@ def test_op4_canonical_path_end_to_end(tmp_path: Path):
     # Sentinel: if anything tries to invoke the patched-eval subprocess, fail.
     with mock.patch.object(vmod, "_patched_hidden_eval") as patched_fn:
         ok, detail, result = vmod.op4_hidden_eval(
-            karpa_root=Path(__file__).resolve().parent.parent,
+            ralph_root=Path(__file__).resolve().parent.parent,
             proof_dir=proof_dir,
         )
         patched_fn.assert_not_called()

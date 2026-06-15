@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from validator.service import (
     KING_CHANGE_WEIGHT,
     MEANINGFUL_FAILURE_WEIGHT,
@@ -47,13 +47,13 @@ index 1111111..2222222 100644
 
 GOOD_RATIONALE = """# Lion optimizer trial
 
-We tested replacing AdamW with the Lion optimizer for the canonical Karpa-1
+We tested replacing AdamW with the Lion optimizer for the canonical Ralph-1
 recipe. The hypothesis was that Lion's sign-based updates would converge
 faster on this transformer architecture at the 254M parameter scale.
 
 After training, we observed val_bpb=3.85, slightly above the king's 3.81.
 Lion required more aggressive warmup than expected. The negative result is
-informative for anyone exploring optimizer alternatives in the Karpa lineage.
+informative for anyone exploring optimizer alternatives in the Ralph lineage.
 
 Worth re-trying with a longer warmup schedule. Future agents can build on
 this trajectory rather than re-discovering the same failure mode.
@@ -115,15 +115,15 @@ def test_diff_single_scalar_two_lines_is_nontrivial(tmp_path):
 
 
 def test_diff_model_dir_counts_as_training_relevant(tmp_path):
-    """A structural patch to model/karpa_base.py (e.g. QK-Norm) MUST count
+    """A structural patch to model/ralph_base.py (e.g. QK-Norm) MUST count
     as touching training. The old filename whitelist omitted model/, which
     blocked attention-variant / init-scheme / structural-axis submissions
     from ever qualifying as meaningful_failure even when they beat the king
     on val_bpb. Round-2 round-trip: A's QK-Norm patch (val_bpb=1.485, beats
     king by 0.026) was incorrectly classified plain_failure for this reason."""
-    diff = """diff --git a/model/karpa_base.py b/model/karpa_base.py
---- a/model/karpa_base.py
-+++ b/model/karpa_base.py
+    diff = """diff --git a/model/ralph_base.py b/model/ralph_base.py
+--- a/model/ralph_base.py
++++ b/model/ralph_base.py
 @@ -38,1 +38,4 @@
      tie_embeddings: bool = True
 +    use_qk_norm: bool = True

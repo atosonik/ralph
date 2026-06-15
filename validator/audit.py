@@ -24,7 +24,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from model import KarpaBase, KarpaConfig
+from model import RalphBase, RalphConfig
 
 from eval import run_hidden_eval
 from proof.runner import run_proof_test
@@ -75,7 +75,7 @@ def check_trajectory(
 
 
 def run_audit(
-    karpa_root: Path,
+    ralph_root: Path,
     submission_dir: Path,
     miner_proof_dir: Path,
     audit_out_dir: Path,
@@ -94,7 +94,7 @@ def run_audit(
 
     # Re-run the proof test with the same submission.
     audit_bundle = run_proof_test(
-        karpa_root=karpa_root,
+        ralph_root=ralph_root,
         submission_dir=submission_dir,
         out_dir=audit_out_dir,
     )
@@ -104,30 +104,30 @@ def run_audit(
     from validator.validator import _safe_load_checkpoint_config, _safe_load_checkpoint_weights
     saved = _safe_load_checkpoint_config(audit_bundle.checkpoint_path)
     audit_state = _safe_load_checkpoint_weights(audit_bundle.checkpoint_path)
-    cfg = KarpaConfig(
+    cfg = RalphConfig(
         vocab_size=saved["vocab_size"], dim=saved["dim"],
         n_layers=saved["n_layers"], n_heads=saved["n_heads"],
         head_dim=saved["head_dim"], ffn_mult=saved.get("ffn_mult", 8 / 3),
         max_seq_len=saved["max_seq_len"],
     )
-    model = KarpaBase(cfg)
+    model = RalphBase(cfg)
     model.load_state_dict(audit_state)
     if torch.cuda.is_available():
         model = model.cuda()
     eval_result = run_hidden_eval(
-        model, karpa_root / "eval" / "private",
+        model, ralph_root / "eval" / "private",
         seq_len=cfg.max_seq_len // 2,
     )
 
     # Hidden-eval on the miner's checkpoint for comparison — same SAFE loader.
     miner_ckpt_path = miner_proof / "training" / "checkpoint.pt"
     miner_state = _safe_load_checkpoint_weights(miner_ckpt_path)
-    miner_model = KarpaBase(cfg)
+    miner_model = RalphBase(cfg)
     miner_model.load_state_dict(miner_state)
     if torch.cuda.is_available():
         miner_model = miner_model.cuda()
     miner_eval = run_hidden_eval(
-        miner_model, karpa_root / "eval" / "private",
+        miner_model, ralph_root / "eval" / "private",
         seq_len=cfg.max_seq_len // 2,
     )
 
@@ -178,7 +178,7 @@ def main() -> None:
     import argparse
 
     p = argparse.ArgumentParser()
-    p.add_argument("--karpa-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--ralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--submission-dir", type=Path, required=True)
     p.add_argument("--miner-proof-dir", type=Path, required=True)
     p.add_argument("--audit-out-dir", type=Path, required=True)
@@ -186,7 +186,7 @@ def main() -> None:
     args = p.parse_args()
 
     result = run_audit(
-        karpa_root=args.karpa_root,
+        ralph_root=args.ralph_root,
         submission_dir=args.submission_dir,
         miner_proof_dir=args.miner_proof_dir,
         audit_out_dir=args.audit_out_dir,

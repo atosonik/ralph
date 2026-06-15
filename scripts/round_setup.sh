@@ -19,7 +19,7 @@ fail() { red "  FAIL: $1"; ok=0; }
 pass() { green "  ok:   $1"; }
 warn() { yellow "  warn: $1"; }
 
-echo "=== Karpa session setup check ==="
+echo "=== Ralph session setup check ==="
 
 # 1. .env present + restrictive
 echo
@@ -29,7 +29,7 @@ if [ -f .env ]; then
   if [ "$mode" = "600" ]; then pass ".env mode 600"; else fail ".env mode $mode (need 600 — chmod 600 .env)"; fi
   # source-and-probe presence; do not echo any values
   set -a; . ./.env 2>/dev/null; set +a
-  for k in BT_NETWORK BT_NETUID BT_WALLET BT_HOTKEY BT_WALLET_PASSWORD HF_TOKEN KARPA_BOT_GH_TOKEN; do
+  for k in BT_NETWORK BT_NETUID BT_WALLET BT_HOTKEY BT_WALLET_PASSWORD HF_TOKEN RALPH_BOT_GH_TOKEN; do
     if [ -n "${!k:-}" ]; then pass "$k: set"; else fail "$k: missing"; fi
   done
 else
@@ -74,7 +74,7 @@ if [ -n "$val_pids" ]; then
   pass "validator running (PIDs: $val_pids)"
 else
   warn "validator not running — start it before kicking off a round:"
-  echo "         cd $ROOT && nohup .venv/bin/python -m validator.service --epoch-seconds 60 --hf-repo karpaai/proof-bundles > logs/validator.log 2>&1 &"
+  echo "         cd $ROOT && nohup .venv/bin/python -m validator.service --epoch-seconds 60 --hf-repo RalphLabsAI/proof-bundles > logs/validator.log 2>&1 &"
 fi
 
 # 6. orphan H100 sweep

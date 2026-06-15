@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from validator.multiseed import (
     MultiSeedEvalResult,
     _mean_stderr,
@@ -137,18 +137,18 @@ def test_mean_stderr_simple_case():
 
 
 def _build_canonical_proof_dir(tmp_path: Path) -> Path:
-    """Create a proof_dir with a real tiny-canonical-KarpaBase checkpoint so
+    """Create a proof_dir with a real tiny-canonical-RalphBase checkpoint so
     op4_hidden_eval has a working input. Mirrors the test_op4_canonical_path
     setup in test_validator_patched_eval.py."""
     import torch
-    from model import KarpaBase, KarpaConfig
+    from model import RalphBase, RalphConfig
 
     # vocab_size matches the GPT-2 token range of active_tokens.bin (max id 50256)
-    cfg = KarpaConfig(
+    cfg = RalphConfig(
         vocab_size=50304, dim=16, n_layers=1, n_heads=2,
         head_dim=8, ffn_mult=8 / 3, max_seq_len=32,
     )
-    model = KarpaBase(cfg)
+    model = RalphBase(cfg)
     proof_dir = tmp_path / "proof"
     (proof_dir / "training").mkdir(parents=True)
     ckpt_path = proof_dir / "training" / "checkpoint.pt"
@@ -175,10 +175,10 @@ def test_multiseed_three_runs_produce_byte_identical_results(tmp_path: Path):
     Pareto build), this test MUST start failing. That failure is the signal
     the multi-seed gate is no longer inert.
     """
-    karpa_root = Path(__file__).resolve().parent.parent
+    ralph_root = Path(__file__).resolve().parent.parent
     proof_dir = _build_canonical_proof_dir(tmp_path)
 
-    ok, detail, result = op4_hidden_eval_multiseed(karpa_root, proof_dir, k=3)
+    ok, detail, result = op4_hidden_eval_multiseed(ralph_root, proof_dir, k=3)
     assert ok, f"unexpected failure: {detail}"
     assert result is not None
     assert result.k == 3
@@ -227,8 +227,8 @@ def test_multiseed_propagates_sub_eval_failure(tmp_path: Path):
     propagates with the underlying failure detail."""
     proof_dir = tmp_path / "no_proof"
     proof_dir.mkdir()
-    karpa_root = Path(__file__).resolve().parent.parent
-    ok, detail, result = op4_hidden_eval_multiseed(karpa_root, proof_dir, k=2)
+    ralph_root = Path(__file__).resolve().parent.parent
+    ok, detail, result = op4_hidden_eval_multiseed(ralph_root, proof_dir, k=2)
     assert ok is False
     assert "sub-eval failed" in detail
     assert "missing checkpoint" in detail
@@ -238,10 +238,10 @@ def test_multiseed_propagates_sub_eval_failure(tmp_path: Path):
 def test_multiseed_result_carries_seeds(tmp_path: Path):
     """The returned dataclass carries the seed list so an external observer
     can reproduce the run from chain state alone."""
-    karpa_root = Path(__file__).resolve().parent.parent
+    ralph_root = Path(__file__).resolve().parent.parent
     proof_dir = _build_canonical_proof_dir(tmp_path)
     seeds = [11, 22, 33]
-    ok, _, result = op4_hidden_eval_multiseed(karpa_root, proof_dir, k=3, seeds=seeds)
+    ok, _, result = op4_hidden_eval_multiseed(ralph_root, proof_dir, k=3, seeds=seeds)
     assert ok
     assert isinstance(result, MultiSeedEvalResult)
     assert result.seeds == seeds
@@ -253,23 +253,23 @@ def test_multiseed_result_carries_seeds(tmp_path: Path):
 
 
 def test_get_king_rule_default_is_legacy(monkeypatch):
-    monkeypatch.delenv("KARPA_KING_RULE", raising=False)
+    monkeypatch.delenv("RALPH_KING_RULE", raising=False)
     assert get_king_rule() == "legacy"
 
 
 def test_get_king_rule_accepts_legacy(monkeypatch):
-    monkeypatch.setenv("KARPA_KING_RULE", "legacy")
+    monkeypatch.setenv("RALPH_KING_RULE", "legacy")
     assert get_king_rule() == "legacy"
 
 
 def test_get_king_rule_accepts_cross_scale_v1(monkeypatch):
     """Forward-compat: B3 will swap in the new rule under this name."""
-    monkeypatch.setenv("KARPA_KING_RULE", "cross_scale_v1")
+    monkeypatch.setenv("RALPH_KING_RULE", "cross_scale_v1")
     assert get_king_rule() == "cross_scale_v1"
 
 
 def test_get_king_rule_falls_back_on_unknown_value(monkeypatch, capsys):
-    monkeypatch.setenv("KARPA_KING_RULE", "garbage")
+    monkeypatch.setenv("RALPH_KING_RULE", "garbage")
     assert get_king_rule() == "legacy"
     captured = capsys.readouterr()
     assert "not recognised" in captured.err
@@ -277,5 +277,5 @@ def test_get_king_rule_falls_back_on_unknown_value(monkeypatch, capsys):
 
 
 def test_get_king_rule_strips_whitespace(monkeypatch):
-    monkeypatch.setenv("KARPA_KING_RULE", "  legacy  ")
+    monkeypatch.setenv("RALPH_KING_RULE", "  legacy  ")
     assert get_king_rule() == "legacy"

@@ -25,7 +25,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from model import KarpaBase, KarpaConfig
+from model import RalphBase, RalphConfig
 
 from eval import HiddenEvalResult, run_hidden_eval
 from miner.submit import lookup_handshake, verify_signature
@@ -68,7 +68,7 @@ class ValidatorResult:
     bundle_hash: str
     handshake_nonce: str
     miner_github: str = ""  # self-declared attribution; informational only
-    pr_url: str = ""  # PR against karpaai/recipe (verified later in service.py)
+    pr_url: str = ""  # PR against RalphLabsAI/recipe (verified later in service.py)
     hidden_eval: HiddenEvalResult | None = None
     training_summary: dict | None = None
     calibration: dict | None = None
@@ -110,7 +110,7 @@ def _safe_load_checkpoint_config(ckpt_path: Path) -> dict:
       3. Reject if both fail.
 
     Bounds-check every field before returning — the values are then passed to
-    KarpaConfig which allocates tensors proportional to them.
+    RalphConfig which allocates tensors proportional to them.
     """
     sidecar = ckpt_path.parent / "checkpoint_config.json"
     if sidecar.exists():
@@ -169,7 +169,7 @@ def _safe_load_checkpoint_weights(ckpt_path: Path, expected_keys: set[str] | Non
 
 
 def op1_diff_and_integrity(
-    karpa_root: Path,
+    ralph_root: Path,
     submission_payload: dict,
     proof_dir: Path,
 ) -> tuple[bool, str]:
@@ -253,10 +253,10 @@ def op1_diff_and_integrity(
 
     # Verify handshake nonce was committed on-chain. Until on-chain commits
     # work reliably for the test, the lookup may fail for legitimate cross-host
-    # miners — set KARPA_SKIP_HANDSHAKE=1 to skip in that mode.
+    # miners — set RALPH_SKIP_HANDSHAKE=1 to skip in that mode.
     import os as _os
-    if not _os.environ.get("KARPA_SKIP_HANDSHAKE"):
-        chain_entry = lookup_handshake(karpa_root, submission_payload["handshake_nonce"])
+    if not _os.environ.get("RALPH_SKIP_HANDSHAKE"):
+        chain_entry = lookup_handshake(ralph_root, submission_payload["handshake_nonce"])
         if chain_entry is None:
             return False, "handshake nonce not found on chain"
         if chain_entry.get("miner_hotkey") != submission_payload["miner_hotkey"]:
@@ -276,7 +276,7 @@ def op1_diff_and_integrity(
     # invoking the runner.
     if patch_path.exists():
         patch_text = patch_path.read_text(encoding="utf-8", errors="replace")
-        restricted_yaml = karpa_root / "restricted_files.yaml"
+        restricted_yaml = ralph_root / "restricted_files.yaml"
         if restricted_yaml.exists():
             patterns = _load_restricted_paths(restricted_yaml)
             violations = scan_diff_for_restricted(patch_text, patterns)
@@ -287,7 +287,7 @@ def op1_diff_and_integrity(
 
 
 def op2_attestation_verify(
-    karpa_root: Path,
+    ralph_root: Path,
     submission_payload: dict,
     proof_dir: Path,
 ) -> tuple[bool, str, str]:
@@ -297,10 +297,10 @@ def op2_attestation_verify(
     "unverified" path; a submission without a valid attestation chain is
     REJECTED outright.
 
-    On mainnet (KARPA_ALLOW_MOCK_ATTESTATION unset or != "1") only real_*
+    On mainnet (RALPH_ALLOW_MOCK_ATTESTATION unset or != "1") only real_*
     attestation types are accepted. Mock attestations exist in the repo as
     open-source code so anyone can forge them — they are explicitly rejected
-    on mainnet. Testnet operators can set KARPA_ALLOW_MOCK_ATTESTATION=1 to
+    on mainnet. Testnet operators can set RALPH_ALLOW_MOCK_ATTESTATION=1 to
     accept mocks (with a loud warning).
 
     See deep_review_2026-05-31 critical #3/#4/#5.
@@ -315,10 +315,10 @@ def op2_attestation_verify(
 
     att_text = att_path.read_text()
     att_data = json.loads(att_text)
-    from karpa_bootstrap import RECIPE_DIR
-    expected_measurement = compute_container_measurement(karpa_root, recipe_dir=RECIPE_DIR)
+    from ralph_bootstrap import RECIPE_DIR
+    expected_measurement = compute_container_measurement(ralph_root, recipe_dir=RECIPE_DIR)
 
-    allow_mock = _os.environ.get("KARPA_ALLOW_MOCK_ATTESTATION") == "1"
+    allow_mock = _os.environ.get("RALPH_ALLOW_MOCK_ATTESTATION") == "1"
 
     # Auto-detect attestation format: real (has attestation_type field) vs legacy mock
     if "attestation_type" in att_data:
@@ -328,13 +328,13 @@ def op2_attestation_verify(
         if not is_real and not allow_mock:
             return False, (
                 f"attestation_type={att_type_label!r} is not real_*; mock "
-                "attestations rejected on mainnet (set KARPA_ALLOW_MOCK_ATTESTATION=1 "
+                "attestations rejected on mainnet (set RALPH_ALLOW_MOCK_ATTESTATION=1 "
                 "for testnet)"
             ), "rejected"
         if not is_real and allow_mock:
             import sys as _sys
             print(
-                "[attest] WARNING: KARPA_ALLOW_MOCK_ATTESTATION=1 — accepting "
+                "[attest] WARNING: RALPH_ALLOW_MOCK_ATTESTATION=1 — accepting "
                 f"mock attestation_type={att_type_label!r}. MUST NOT BE SET ON MAINNET.",
                 file=_sys.stderr,
             )
@@ -349,11 +349,11 @@ def op2_attestation_verify(
         if not allow_mock:
             return False, (
                 "legacy mock attestation rejected on mainnet "
-                "(set KARPA_ALLOW_MOCK_ATTESTATION=1 for testnet)"
+                "(set RALPH_ALLOW_MOCK_ATTESTATION=1 for testnet)"
             ), "rejected"
         import sys as _sys
         print(
-            "[attest] WARNING: KARPA_ALLOW_MOCK_ATTESTATION=1 — accepting "
+            "[attest] WARNING: RALPH_ALLOW_MOCK_ATTESTATION=1 — accepting "
             "legacy mock attestation. MUST NOT BE SET ON MAINNET.",
             file=_sys.stderr,
         )
@@ -399,7 +399,7 @@ def op3_log_plausibility(proof_dir: Path) -> tuple[bool, str]:
 
 def _is_state_dict_shape_mismatch(err: Exception) -> bool:
     """Detect when a load_state_dict failure is due to architecture divergence
-    between the validator's canonical KarpaBase and the miner's trained model.
+    between the validator's canonical RalphBase and the miner's trained model.
 
     These are the recoverable cases — the miner's patch added/removed/renamed
     parameters relative to canonical. We can retry under a patched-workdir
@@ -414,11 +414,11 @@ def _is_state_dict_shape_mismatch(err: Exception) -> bool:
 
 
 def _patched_hidden_eval(
-    karpa_root: Path,
+    ralph_root: Path,
     proof_dir: Path,
     ckpt_path: Path,
 ) -> tuple[bool, str, HiddenEvalResult | None]:
-    """Fallback path when canonical KarpaBase can't load the miner's checkpoint.
+    """Fallback path when canonical RalphBase can't load the miner's checkpoint.
 
     Creates a temp workdir, applies the miner's patch.diff against a copy of
     the canonical recipe, and runs eval_in_workdir.py as a subprocess so the
@@ -437,21 +437,21 @@ def _patched_hidden_eval(
         return False, "state_dict mismatch and no patch.diff to retry with", None
 
     try:
-        from karpa_bootstrap import RECIPE_DIR
+        from ralph_bootstrap import RECIPE_DIR
     except Exception as e:
         return False, f"patched-eval setup: bootstrap import failed: {e}", None
 
-    with tempfile.TemporaryDirectory(prefix="karpa_patched_eval_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ralph_patched_eval_") as tmp:
         workdir = Path(tmp) / "workdir"
         workdir.mkdir(parents=True)
         # Mirror the proof.runner layout: recipe sources from RECIPE_DIR, eval
-        # / calibration from the karpa protocol root.
+        # / calibration from the ralph protocol root.
         for sub in ("model", "recipe", "data", "configs"):
             src = RECIPE_DIR / sub
             if src.exists():
                 shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
         for sub in ("eval", "calibration"):
-            src = karpa_root / sub
+            src = ralph_root / sub
             if src.exists():
                 shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
 
@@ -466,7 +466,7 @@ def _patched_hidden_eval(
 
         try:
             res = subprocess.run(
-                [sys.executable, str(helper), str(workdir), str(ckpt_path), str(karpa_root)],
+                [sys.executable, str(helper), str(workdir), str(ckpt_path), str(ralph_root)],
                 capture_output=True,
                 text=True,
                 timeout=240,
@@ -477,13 +477,13 @@ def _patched_hidden_eval(
             tail = (res.stderr or "")[-300:]
             return False, f"patched-eval subprocess exit={res.returncode}: {tail}", None
 
-        marker = "KARPA_EVAL_RESULT "
+        marker = "RALPH_EVAL_RESULT "
         line = next(
             (ln for ln in (res.stdout or "").splitlines() if ln.startswith(marker)),
             None,
         )
         if line is None:
-            return False, "patched-eval: no KARPA_EVAL_RESULT line in stdout", None
+            return False, "patched-eval: no RALPH_EVAL_RESULT line in stdout", None
 
         fields: dict[str, str] = {}
         for tok in line[len(marker):].split():
@@ -512,7 +512,7 @@ def _patched_hidden_eval(
 
 
 def op4_hidden_eval(
-    karpa_root: Path,
+    ralph_root: Path,
     proof_dir: Path,
 ) -> tuple[bool, str, HiddenEvalResult | None]:
     ckpt_path = proof_dir / "training" / "checkpoint.pt"
@@ -521,7 +521,7 @@ def op4_hidden_eval(
     # Load config + weights using the SAFE path — no pickle reducers, bounds-checked.
     saved = _safe_load_checkpoint_config(ckpt_path)
     state_dict = _safe_load_checkpoint_weights(ckpt_path)
-    cfg = KarpaConfig(
+    cfg = RalphConfig(
         vocab_size=saved["vocab_size"],
         dim=saved["dim"],
         n_layers=saved["n_layers"],
@@ -531,24 +531,24 @@ def op4_hidden_eval(
         max_seq_len=saved["max_seq_len"],
     )
     try:
-        model = KarpaBase(cfg)
+        model = RalphBase(cfg)
         model.load_state_dict(state_dict)
     except RuntimeError as e:
-        # Architecture divergence between canonical KarpaBase and the miner's
+        # Architecture divergence between canonical RalphBase and the miner's
         # trained model (typically a structural patch that adds parameters).
         # Retry under the patched workdir so the actually-trained model code
         # is what scores the checkpoint.
         if _is_state_dict_shape_mismatch(e):
-            return _patched_hidden_eval(karpa_root, proof_dir, ckpt_path)
+            return _patched_hidden_eval(ralph_root, proof_dir, ckpt_path)
         raise
     if torch.cuda.is_available():
         model = model.cuda()
-    result = run_hidden_eval(model, karpa_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
+    result = run_hidden_eval(model, ralph_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
     return True, f"val_bpb={result.val_bpb:.4f} bench={result.benchmark_accuracy:.3f}", result
 
 
 def judge_submission(
-    karpa_root: Path,
+    ralph_root: Path,
     proof_dir: Path,
 ) -> ValidatorResult:
     """Run the four ops in order. Any failure shorts out and returns a rejection."""
@@ -569,13 +569,13 @@ def judge_submission(
         handshake_nonce=submission["handshake_nonce"],
     )
 
-    ok, detail = op1_diff_and_integrity(karpa_root, submission, proof_dir)
+    ok, detail = op1_diff_and_integrity(ralph_root, submission, proof_dir)
     result.operations["op1_diff_integrity"] = {"ok": ok, "detail": detail}
     if not ok:
         result.rejected = ValidatorReject("op1_diff_integrity", detail)
         return result
 
-    ok, detail, tier = op2_attestation_verify(karpa_root, submission, proof_dir)
+    ok, detail, tier = op2_attestation_verify(ralph_root, submission, proof_dir)
     result.operations["op2_attestation"] = {"ok": ok, "detail": detail, "tier": tier}
     if not ok:
         result.rejected = ValidatorReject("op2_attestation", detail)
@@ -587,7 +587,7 @@ def judge_submission(
         result.rejected = ValidatorReject("op3_log_plausibility", detail)
         return result
 
-    ok, detail, hidden_eval = op4_hidden_eval(karpa_root, proof_dir)
+    ok, detail, hidden_eval = op4_hidden_eval(ralph_root, proof_dir)
     result.operations["op4_hidden_eval"] = {"ok": ok, "detail": detail}
     result.hidden_eval = hidden_eval
 
@@ -606,11 +606,11 @@ def main() -> None:
     import argparse
 
     p = argparse.ArgumentParser()
-    p.add_argument("--karpa-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--ralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--proof-dir", type=Path, required=True)
     args = p.parse_args()
 
-    res = judge_submission(args.karpa_root, args.proof_dir)
+    res = judge_submission(args.ralph_root, args.proof_dir)
     print(json.dumps(res.to_dict(), indent=2, default=str))
 
 

@@ -1,4 +1,4 @@
-"""Open a karpaai/recipe PR from the miner's fork as part of submission.
+"""Open a RalphLabsAI/recipe PR from the miner's fork as part of submission.
 
 The PR carries (a) the patch the miner is submitting, (b) the on-chain
 metadata that ties it to the proof bundle on HuggingFace. Validators verify
@@ -6,14 +6,14 @@ the PR exists, is open, and that its diff byte-matches the bundle's
 patch.diff before accepting the submission.
 
 Required env vars on the miner box:
-  KARPA_MINER_GH         — miner's GitHub username (e.g. "karpa1-gh")
-  KARPA_MINER_GH_TOKEN   — PAT with `public_repo` scope; pushes to the
+  RALPH_MINER_GH         — miner's GitHub username (e.g. "ralph1-gh")
+  RALPH_MINER_GH_TOKEN   — PAT with `public_repo` scope; pushes to the
                            miner's fork, opens PR upstream.
-  KARPA_RECIPE_FORK      — full URL of the miner's fork
-                           (e.g. https://github.com/karpa1-gh/recipe.git)
+  RALPH_RECIPE_FORK      — full URL of the miner's fork
+                           (e.g. https://github.com/ralph1-gh/recipe.git)
 
 Optional:
-  KARPA_RECIPE_UPSTREAM  — defaults to "karpaai/recipe"
+  RALPH_RECIPE_UPSTREAM  — defaults to "RalphLabsAI/recipe"
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ def open_recipe_pr(
     signature_hex: str,
     fork_url: str,
     token: str,
-    upstream: str = "karpaai/recipe",
+    upstream: str = "RalphLabsAI/recipe",
     rationale_text: str = "",
 ) -> str:
     """Push a branch with the patch applied to the miner's fork, then open
@@ -111,7 +111,7 @@ def open_recipe_pr(
     the human reviewer reads the hypothesis before the proof identifiers.
     """
     if not token:
-        raise RuntimeError("KARPA_MINER_GH_TOKEN is not set — cannot open PR")
+        raise RuntimeError("RALPH_MINER_GH_TOKEN is not set — cannot open PR")
     if not patch_text.strip():
         # Baseline submissions with an empty patch can't be a PR; skip.
         return ""
@@ -154,7 +154,7 @@ def open_recipe_pr(
         keep = _BODY_CAP - len(_TRUNC_MARK)
         commit_body = commit_body[:keep] + _TRUNC_MARK
 
-    workdir = Path(tempfile.mkdtemp(prefix="karpa_pr_"))
+    workdir = Path(tempfile.mkdtemp(prefix="ralph_pr_"))
     try:
         # 1. Clone the fork
         _run(["git", "clone", "--depth=1", fork_url, str(workdir)], cwd=Path("/tmp"))
@@ -166,7 +166,7 @@ def open_recipe_pr(
         _run(["git", "checkout", "-B", branch, "upstream/main"], cwd=workdir)
 
         # 3. Apply the patch
-        patch_path = workdir / ".karpa_submission.patch"
+        patch_path = workdir / ".ralph_submission.patch"
         patch_path.write_text(patch_text)
         _run(["git", "apply", "--whitespace=nowarn", str(patch_path)], cwd=workdir)
         patch_path.unlink()
@@ -176,8 +176,8 @@ def open_recipe_pr(
         _run(
             [
                 "git",
-                "-c", f"user.name={miner_github or 'karpa-miner'}",
-                "-c", f"user.email={miner_github or 'miner'}@karpa.local",
+                "-c", f"user.name={miner_github or 'ralph-miner'}",
+                "-c", f"user.email={miner_github or 'miner'}@ralph.local",
                 "commit",
                 "-m", title,
                 "-m", commit_body,

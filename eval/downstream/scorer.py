@@ -15,7 +15,7 @@ Why pure kernels:
 
 Forward-pass adapter:
   `_extract_logits(model_output)` tolerates models that return logits directly
-  OR a `(logits, loss_or_aux)` tuple. Karpa's `KarpaBase` is the latter; most
+  OR a `(logits, loss_or_aux)` tuple. Ralph's `RalphBase` is the latter; most
   external HF models are the former.
 
 Position indexing (the one subtle thing):
@@ -100,7 +100,7 @@ class LMExample:
 def _extract_logits(model_output) -> torch.Tensor:
     """Adapt to both `model(x) -> logits` and `model(x) -> (logits, _)`.
 
-    Karpa's KarpaBase returns the tuple form (logits, optional_loss); most
+    Ralph's RalphBase returns the tuple form (logits, optional_loss); most
     HuggingFace causal-LM models return logits directly. The harness must
     handle either without forcing the caller to know which is which.
     """

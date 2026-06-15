@@ -12,8 +12,8 @@ ALGORITHM (pinned):
      `recipe_id → {reference_name: float}` for each reference in the
      pre-committed set).
   2. For each reference, build paired vectors
-     `(karpa_s3_overall[i], ref_score[i])` over the recipe set, dropping
-     any recipe whose Karpa run aborted OR whose reference score is NaN
+     `(ralph_s3_overall[i], ref_score[i])` over the recipe set, dropping
+     any recipe whose Ralph run aborted OR whose reference score is NaN
      (the survivor count is reported per reference).
   3. Compute the Spearman ρ via Pearson on average-ranked values
      (matches scipy.stats.spearmanr with `nan_policy='omit'` semantics
@@ -79,10 +79,10 @@ BOOTSTRAP_N_RESAMPLES: int = 10_000
 BOOTSTRAP_CI: float = 0.95
 BOOTSTRAP_SEED: int = 0
 
-# Which Karpa axis we correlate with the reference. S3 overall is
+# Which Ralph axis we correlate with the reference. S3 overall is
 # pinned per the pre-registration; per-axis breakdowns are diagnostic
 # only, not the GATE.
-KARPA_AXIS_FOR_RHO: str = "s3_overall"
+RALPH_AXIS_FOR_RHO: str = "s3_overall"
 
 
 # ============================================================================
@@ -107,7 +107,7 @@ class B6AnalysisResult:
     """Top-level analysis output."""
 
     pinned_references: list[str]
-    karpa_axis: str
+    ralph_axis: str
     pass_lower_ci_threshold: float
     pass_olmo_point_threshold: float
     pass_olmo_reference_name: str
@@ -122,11 +122,11 @@ class B6AnalysisResult:
 
 
 # ============================================================================
-# Karpa S3-overall extraction
+# Ralph S3-overall extraction
 # ============================================================================
 
 
-def _karpa_s3_overall_from_report(report_dict: dict) -> Optional[float]:
+def _ralph_s3_overall_from_report(report_dict: dict) -> Optional[float]:
     """Extract a single S3-overall scalar from a DownstreamReport dict.
 
     v0.11-lite definition: mean accuracy across all cells with the `:S3`
@@ -144,7 +144,7 @@ def _karpa_s3_overall_from_report(report_dict: dict) -> Optional[float]:
     return sum(s3_accs) / len(s3_accs)
 
 
-def _karpa_score_for_recipe(
+def _ralph_score_for_recipe(
     recipe_record: dict,
     per_recipe_dir: Path,
 ) -> Optional[float]:
@@ -168,7 +168,7 @@ def _karpa_score_for_recipe(
         report_dict = json.loads(p.read_text())
     except (OSError, json.JSONDecodeError):
         return None
-    return _karpa_s3_overall_from_report(report_dict)
+    return _ralph_s3_overall_from_report(report_dict)
 
 
 # ============================================================================
@@ -288,22 +288,22 @@ def analyze_b6(
     if not recipes:
         raise ValueError("run_result.recipes is empty")
 
-    # Build the Karpa score vector (per-recipe S3 overall) — drops
+    # Build the Ralph score vector (per-recipe S3 overall) — drops
     # aborted / missing recipes.
-    karpa_by_id: dict[str, float] = {}
+    ralph_by_id: dict[str, float] = {}
     for rec in recipes:
-        score = _karpa_score_for_recipe(rec, per_recipe_dir)
+        score = _ralph_score_for_recipe(rec, per_recipe_dir)
         if score is not None:
-            karpa_by_id[rec["id"]] = score
+            ralph_by_id[rec["id"]] = score
 
-    if not karpa_by_id:
-        raise ValueError("no Karpa S3 scores survived; cannot compute rho")
+    if not ralph_by_id:
+        raise ValueError("no Ralph S3 scores survived; cannot compute rho")
 
     per_reference: list[ReferenceRhoResult] = []
     for ref_name in PINNED_REFERENCES:
-        x: list[float] = []  # Karpa S3 overall
+        x: list[float] = []  # Ralph S3 overall
         y: list[float] = []  # reference score
-        for recipe_id, karpa_score in karpa_by_id.items():
+        for recipe_id, ralph_score in ralph_by_id.items():
             ref_score_map = refs.get(recipe_id, {})
             ref_score = ref_score_map.get(ref_name)
             if ref_score is None:
@@ -314,7 +314,7 @@ def analyze_b6(
                 continue
             if math.isnan(ref_f):
                 continue
-            x.append(karpa_score)
+            x.append(ralph_score)
             y.append(ref_f)
         if len(x) < 3:
             # Not enough pairs; CI is reported as nan and the gate fails
@@ -375,7 +375,7 @@ def analyze_b6(
 
     return B6AnalysisResult(
         pinned_references=list(PINNED_REFERENCES),
-        karpa_axis=KARPA_AXIS_FOR_RHO,
+        ralph_axis=RALPH_AXIS_FOR_RHO,
         pass_lower_ci_threshold=PASS_LOWER_CI_THRESHOLD,
         pass_olmo_point_threshold=PASS_OLMO_POINT_THRESHOLD,
         pass_olmo_reference_name=PASS_OLMO_REFERENCE_NAME,

@@ -141,7 +141,7 @@ def _mean_stderr(xs: list[float]) -> tuple[float, float]:
 
 
 def op4_hidden_eval_multiseed(
-    karpa_root: Path,
+    ralph_root: Path,
     proof_dir: Path,
     k: int = 3,
     *,
@@ -154,7 +154,7 @@ def op4_hidden_eval_multiseed(
     introduces the API. B3 / B7 will wire it in.
 
     Args:
-        karpa_root: Project root (forwarded to op4_hidden_eval).
+        ralph_root: Project root (forwarded to op4_hidden_eval).
         proof_dir: Bundle directory (forwarded to op4_hidden_eval).
         k: Number of seeds to evaluate under. Default 3. The plan's pinned
            value for v0.10 → v0.11.
@@ -185,7 +185,7 @@ def op4_hidden_eval_multiseed(
     individual: list[HiddenEvalResult] = []
     for seed in seeds:
         del seed  # forward-compat: today's eval doesn't consume the seed
-        ok, detail, result = op4_hidden_eval(karpa_root, proof_dir)
+        ok, detail, result = op4_hidden_eval(ralph_root, proof_dir)
         if not ok or result is None:
             return False, f"sub-eval failed: {detail}", None
         individual.append(result)

@@ -17,7 +17,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream import (
     POOL_CORE22,
     CellResult,

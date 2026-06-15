@@ -7,7 +7,7 @@ Replaces the local JSON chain with real Bittensor on-chain operations:
   - Handshake nonces committed via subtensor.commit()
   - King state derived from chain weights + off-chain metadata
 
-Karpa does NOT use the standard axon/dendrite query pattern. Miners
+Ralph does NOT use the standard axon/dendrite query pattern. Miners
 submit proof bundles asynchronously (via HuggingFace Hub); validators
 download, score, and set weights on-chain. The "communication" is:
 
@@ -114,7 +114,7 @@ class BittensorChain(ChainInterface):
         which does NOT exist on bittensor 10.4.0 — the method is
         set_commitment(). The AttributeError was being swallowed silently,
         meaning no handshake has ever made it on-chain (this is the root
-        cause of KARPA_SKIP_HANDSHAKE=1 being mandatory until now).
+        cause of RALPH_SKIP_HANDSHAKE=1 being mandatory until now).
 
         We now raise on commit failure so the miner gets an explicit
         rejection instead of a "successful" handshake that's actually

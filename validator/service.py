@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Continuous validator service — the 24/7 loop that makes Karpa a real subnet.
+Continuous validator service — the 24/7 loop that makes Ralph a real subnet.
 
 Each epoch (~tempo blocks):
   1. Sync metagraph
@@ -39,7 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR onto sys.path
+import ralph_bootstrap  # noqa: F401  — injects RALPH_RECIPE_DIR onto sys.path
 from chain_layer.config import get_chain
 from validator.hf_poller import DEFAULT_REPO as DEFAULT_HF_REPO
 from validator.hf_poller import poll_hub
@@ -63,7 +63,7 @@ def log_err(msg: str) -> None:
     print(f"{_ts()} [ERROR] {msg}", flush=True)
 
 def log_debug(msg: str) -> None:
-    if os.environ.get("KARPA_DEBUG"):
+    if os.environ.get("RALPH_DEBUG"):
         print(f"{_ts()} [DEBUG] {msg}", flush=True)
 
 
@@ -82,7 +82,7 @@ RATIONALE_MIN_NON_WS_CHARS = 200
 RATIONALE_MIN_PARAGRAPHS = 2
 DIFF_MIN_CHANGED_LINES = 1  # >1 means ≥2 changed lines — admits single-scalar hypothesis tests
 
-KARPA_ROOT = Path(__file__).resolve().parent.parent
+RALPH_ROOT = Path(__file__).resolve().parent.parent
 SHUTDOWN = False
 
 
@@ -117,11 +117,11 @@ def archive_bundle(bundle_dir: Path, queue_dir: Path, dest: str) -> None:
 
 
 def _verify_pr_if_required(result, bundle_dir: Path) -> tuple[bool, str]:
-    """If $KARPA_BOT_GH_TOKEN is set and the submission carries a pr_url,
+    """If $RALPH_BOT_GH_TOKEN is set and the submission carries a pr_url,
     verify the PR's diff is byte-equal to the bundle's patch.diff.
     Returns (ok, detail). If verification isn't configured, returns (True, "").
     """
-    token = os.environ.get("KARPA_BOT_GH_TOKEN", "")
+    token = os.environ.get("RALPH_BOT_GH_TOKEN", "")
     if not token or not result.pr_url:
         return True, ""
     patch_path = bundle_dir / "patch.diff"
@@ -253,7 +253,7 @@ def score_and_decide(
     noise_floor_margin: float,
 ) -> dict:
     """Score one submission against the current king. Returns a result dict."""
-    result = judge_submission(KARPA_ROOT, bundle_dir)
+    result = judge_submission(RALPH_ROOT, bundle_dir)
 
     if result.rejected:
         return {
@@ -655,14 +655,14 @@ def run_epoch(
                 except Exception as e:
                     log_warn(f"audit enqueue failed for {bundle_id}: {e}")
 
-            # Auto-merge the winning PR + tag + release on karpaai/recipe.
-            # Requires KARPA_BOT_GH_TOKEN. Failures here don't unwind the king
+            # Auto-merge the winning PR + tag + release on RalphLabsAI/recipe.
+            # Requires RALPH_BOT_GH_TOKEN. Failures here don't unwind the king
             # — the on-chain crown already happened.
-            bot_token = os.environ.get("KARPA_BOT_GH_TOKEN", "")
+            bot_token = os.environ.get("RALPH_BOT_GH_TOKEN", "")
             pr_url = result.get("pr_url", "")
             # Read .hf_pr.json once up front so we can use the actual bundle
             # repo_id for the release-notes link (not just whatever the
-            # validator's KARPA_HF_REPO env var happens to say). Falls back to
+            # validator's RALPH_HF_REPO env var happens to say). Falls back to
             # the env var if the bundle didn't ship via an HF PR.
             hf_pr_info: dict | None = None
             hf_pr_path = bundle_dir / ".hf_pr.json"
@@ -676,7 +676,7 @@ def run_epoch(
                     log_warn(f"failed to read .hf_pr.json for {bundle_id}: {e}")
             hf_bundle_repo = (
                 (hf_pr_info or {}).get("repo_id")
-                or os.environ.get("KARPA_HF_REPO", "karpaai/proof-bundles")
+                or os.environ.get("RALPH_HF_REPO", "RalphLabsAI/proof-bundles")
             )
             if bot_token and pr_url:
                 # Pull the hypothesis (short) from submission.json and the full
@@ -750,13 +750,13 @@ def run_epoch(
                 except Exception as e:
                     log_warn(f"recipe release failed: {e}")
             elif pr_url and not bot_token:
-                log_warn(f"king changed with PR {pr_url} but KARPA_BOT_GH_TOKEN unset — manual merge needed")
+                log_warn(f"king changed with PR {pr_url} but RALPH_BOT_GH_TOKEN unset — manual merge needed")
 
             # Merge the corresponding HF PR (if the bundle came from one).
             # Reuse hf_pr_info read at the top of the king-change block.
             if hf_pr_info is not None:
                 hf_pr = hf_pr_info
-                hf_token = os.environ.get("KARPA_BOT_HF_TOKEN") or os.environ.get("HF_TOKEN", "")
+                hf_token = os.environ.get("RALPH_BOT_HF_TOKEN") or os.environ.get("HF_TOKEN", "")
                 if hf_token:
                     from validator.hf_bot import merge_pr as hf_merge_pr
                     res = hf_merge_pr(
@@ -815,14 +815,14 @@ def run_epoch(
 
 
 def main():
-    p = argparse.ArgumentParser(description="Karpa continuous validator service")
-    p.add_argument("--queue-dir", type=Path, default=KARPA_ROOT / "queue")
+    p = argparse.ArgumentParser(description="Ralph continuous validator service")
+    p.add_argument("--queue-dir", type=Path, default=RALPH_ROOT / "queue")
     p.add_argument("--epoch-seconds", type=int, default=120,
                    help="Seconds between epochs (default: 120, ~10 blocks)")
     p.add_argument("--noise-floor", type=float, default=0.013,
                    help="val_bpb margin for 'decisively beats king' (default: 0.013 from H100 calibration)")
     p.add_argument(
-        "--hf-repo", default=os.environ.get("KARPA_HF_REPO", DEFAULT_HF_REPO),
+        "--hf-repo", default=os.environ.get("RALPH_HF_REPO", DEFAULT_HF_REPO),
         help=(
             f"HuggingFace dataset repo to poll (default: {DEFAULT_HF_REPO}). "
             "Set to empty string to disable."
@@ -836,10 +836,10 @@ def main():
     args = p.parse_args()
 
     log_info("=" * 60)
-    log_info("  Karpa Validator Service")
+    log_info("  Ralph Validator Service")
     log_info("=" * 60)
 
-    chain = get_chain(KARPA_ROOT)
+    chain = get_chain(RALPH_ROOT)
     args.queue_dir.mkdir(parents=True, exist_ok=True)
     (args.queue_dir / "pending").mkdir(exist_ok=True)
 

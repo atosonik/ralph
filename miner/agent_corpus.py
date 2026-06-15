@@ -20,10 +20,10 @@ import json
 from dataclasses import dataclass
 from typing import Optional
 
-from .agent_memory import KARPA_ROOT, read_memory
+from .agent_memory import RALPH_ROOT, read_memory
 
-CHAIN_DIR = KARPA_ROOT / "chain"
-QUEUE_DIR = KARPA_ROOT / "queue"
+CHAIN_DIR = RALPH_ROOT / "chain"
+QUEUE_DIR = RALPH_ROOT / "queue"
 
 # Default noise-floor margin used by the validator. Matches the constant in
 # validator/service.py and the canonical noise-floor study in /docs.

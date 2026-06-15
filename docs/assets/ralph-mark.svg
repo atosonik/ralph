@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <!-- Karpa mark only (no wordmark). Square format for avatars,
-       favicons, social profile pictures. -->
+  <!-- Ralph mark (no wordmark). Square format for avatars, favicons,
+       social profile pictures. PLACEHOLDER: the glyph below is still the
+       legacy "K" letterform — pending redesign to an "R". -->
   <!-- background (remove for transparent use) -->
   <rect width="200" height="200" fill="#FFFFFF"/>
   <g transform="translate(55, 50)">

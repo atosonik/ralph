@@ -12,7 +12,7 @@ Covers:
     shift, not a sign error).
 
 These tests use a tiny synthetic torch model so they run on CPU; they
-do NOT exercise KarpaBase. The actual transformer correctness is tested
+do NOT exercise RalphBase. The actual transformer correctness is tested
 elsewhere (tests/test_model.py).
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.sealed_streams import SealedStreamBatch, SealedStreamSpec
 from eval.val_bpb import (
     DEFAULT_BYTES_PER_TOKEN,
@@ -42,7 +42,7 @@ VOCAB = 50  # small enough that CPU tests run fast
 
 
 class _TinyModel(torch.nn.Module):
-    """Returns (logits, None) — matches KarpaBase's forward signature."""
+    """Returns (logits, None) — matches RalphBase's forward signature."""
 
     def __init__(self, vocab_size: int = VOCAB, dim: int = 8):
         super().__init__()

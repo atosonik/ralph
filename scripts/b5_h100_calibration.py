@@ -8,7 +8,7 @@ scales)`).
 
 USAGE:
     python scripts/b5_h100_calibration.py \\
-        --karpa-root /path/to/karpa_root \\
+        --ralph-root /path/to/ralph_root \\
         --bundle-dir eval/private/downstream_pool/bundle_v1 \\
         --bundle-sha-sha256 <sha> \\
         --baseline-checkpoint /path/to/baseline.pt \\
@@ -46,12 +46,12 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401, E402
+import ralph_bootstrap  # noqa: F401, E402
 from eval.downstream.calibration import (  # noqa: E402
     aggregate_noise_floors,
     write_noise_floor_table_json,
 )
-from eval.downstream.runner import KARPA_VOCAB_SIZE  # noqa: E402
+from eval.downstream.runner import RALPH_VOCAB_SIZE  # noqa: E402
 from eval.downstream.runner_subprocess import EvalSubprocessError  # noqa: E402
 from validator.ladder import (  # noqa: E402
     EVAL_MODE_V011,
@@ -89,13 +89,13 @@ def _make_baseline_submission(seed: int) -> Submission:
         branch_id="main",
         bundle_hash=f"calibration_baseline_seed_{seed}",
         miner_hotkey="5F_calibration_baseline",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
 
 
 def run_calibration(
     *,
-    karpa_root: Path,
+    ralph_root: Path,
     baseline_checkpoint: Path,
     bundle_dir: Path,
     bundle_sha256: str,
@@ -112,7 +112,7 @@ def run_calibration(
     """Drive N baseline runs and write `noise_floors_v1.json`.
 
     Args:
-      karpa_root: passed to `run_ladder_eval` as `--karpa-root`.
+      ralph_root: passed to `run_ladder_eval` as `--ralph-root`.
       baseline_checkpoint: the canonical baseline checkpoint to evaluate.
       bundle_dir: DCLM bundle root (per-task JSONLs + private_hard/ subdir).
       bundle_sha256: pinned bundle SHA.
@@ -165,7 +165,7 @@ def run_calibration(
                 _make_baseline_submission(seed),
                 config,
                 checkpoint_path=baseline_checkpoint,
-                karpa_root=karpa_root,
+                ralph_root=ralph_root,
                 mode=EVAL_MODE_V011,
                 command_prefix=command_prefix,
                 timeout_s_per_rung=timeout_s_per_rung,
@@ -210,7 +210,7 @@ def run_calibration(
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="scripts.b5_h100_calibration")
-    p.add_argument("--karpa-root", required=True, type=Path)
+    p.add_argument("--ralph-root", required=True, type=Path)
     p.add_argument("--baseline-checkpoint", required=True, type=Path)
     p.add_argument("--bundle-dir", required=True, type=Path)
     p.add_argument("--bundle-sha-sha256", required=True, dest="bundle_sha256")
@@ -239,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     started = time.time()
     try:
         summary = run_calibration(
-            karpa_root=args.karpa_root,
+            ralph_root=args.ralph_root,
             baseline_checkpoint=args.baseline_checkpoint,
             bundle_dir=args.bundle_dir,
             bundle_sha256=args.bundle_sha256,

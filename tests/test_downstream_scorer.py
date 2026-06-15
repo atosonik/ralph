@@ -19,7 +19,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream.scorer import (
     LMExample,
     MCExample,
@@ -162,7 +162,7 @@ def test_extract_logits_passthrough_tensor():
 
 
 def test_extract_logits_unwraps_tuple():
-    """Karpa's KarpaBase returns (logits, optional_loss). The first element
+    """Ralph's RalphBase returns (logits, optional_loss). The first element
     is the logits."""
     t = torch.zeros((1, 3, VOCAB))
     loss = torch.tensor(1.23)

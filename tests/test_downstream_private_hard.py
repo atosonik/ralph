@@ -15,7 +15,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream import (
     POOL_PRIVATE_HARD,
     CellResult,
@@ -58,7 +58,7 @@ def test_private_hard_task_names_pinned():
 
 def test_private_hard_no_openbookqa():
     """OpenBookQA pre-swapped out (CC-BY-NC-SA-4.0 incompatible with
-    Karpa's commercial emission use)."""
+    Ralph's commercial emission use)."""
     assert "openbook_qa" not in PRIVATE_HARD_TASKS
     assert "openbookqa" not in PRIVATE_HARD_TASKS
 

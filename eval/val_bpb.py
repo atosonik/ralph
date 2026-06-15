@@ -6,7 +6,7 @@ distribution: bpb = (cross_entropy_in_nats * tokens_count) / (log(2) * byte_coun
 
 It is vocabulary-independent (unlike perplexity), so architectural changes
 that change tokenization are scored fairly. This is what autoresearch
-optimizes by default; Karpa inherits the metric for the LLM
+optimizes by default; Ralph inherits the metric for the LLM
 pretraining launch track.
 
 Per-stream bytes_per_token (B2):

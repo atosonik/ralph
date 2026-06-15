@@ -65,7 +65,7 @@ _TRAINING_ENV_ALLOWLIST = (
 _TRAINING_ENV_BLOCKLIST = (
     "BT_WALLET_PASSWORD", "BT_WALLET", "BT_HOTKEY",
     "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_HUB_TOKEN",
-    "KARPA_BOT_GH_TOKEN", "KARPA_BOT_HF_TOKEN",
+    "RALPH_BOT_GH_TOKEN", "RALPH_BOT_HF_TOKEN",
     "SHADEFORM_API_KEY", "WANDB_API_KEY",
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
     "AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "AWS_SESSION_TOKEN",
@@ -116,13 +116,13 @@ def _redacted(text: str) -> str:
     return out
 
 
-def _list_proof_sources(karpa_root: Path) -> list[Path]:
+def _list_proof_sources(ralph_root: Path) -> list[Path]:
     """DEPRECATED — kept for any in-tree caller. New code uses
     proof.sources.list_proof_sources which produces (base, rel) tuples
     that hash to the same digest from any filesystem layout."""
-    from karpa_bootstrap import RECIPE_DIR
     from proof.sources import list_proof_sources
-    return [base / rel for base, rel in list_proof_sources(karpa_root, RECIPE_DIR)]
+    from ralph_bootstrap import RECIPE_DIR
+    return [base / rel for base, rel in list_proof_sources(ralph_root, RECIPE_DIR)]
 
 
 def _load_restricted_paths(restricted_yaml: Path) -> list[str]:
@@ -281,7 +281,7 @@ class ProofTestBundle:
 
 
 def run_proof_test(
-    karpa_root: Path,
+    ralph_root: Path,
     submission_dir: Path,
     out_dir: Path,
     total_steps_override: int | None = None,
@@ -289,7 +289,7 @@ def run_proof_test(
 ) -> ProofTestBundle:
     submission_dir = Path(submission_dir)
     out_dir = Path(out_dir)
-    karpa_root = Path(karpa_root)
+    ralph_root = Path(ralph_root)
 
     proof_request = json.loads((submission_dir / "proof_request.json").read_text())
     handshake_nonce = proof_request["handshake_nonce"]
@@ -301,11 +301,11 @@ def run_proof_test(
     # 1. Compute container measurement BEFORE patching (the canonical recipe's
     #    measurement). The container_measurement in Phase 0.5+ is the Docker
     #    image digest, which is independent of any miner patch.
-    from karpa_bootstrap import RECIPE_DIR
-    container_measurement = compute_container_measurement(karpa_root, recipe_dir=RECIPE_DIR)
+    from ralph_bootstrap import RECIPE_DIR
+    container_measurement = compute_container_measurement(ralph_root, recipe_dir=RECIPE_DIR)
 
     # 2. Scan the patch for restricted-file violations.
-    restricted_yaml = karpa_root / "restricted_files.yaml"
+    restricted_yaml = ralph_root / "restricted_files.yaml"
     restricted_patterns = _load_restricted_paths(restricted_yaml)
     patch_text = patch_path.read_text() if patch_path.exists() else ""
     violations = scan_diff_for_restricted(patch_text, restricted_patterns)
@@ -314,24 +314,24 @@ def run_proof_test(
 
     # 3. Create a working copy of the canonical recipe and apply the patch.
     #    The recipe (model/, recipe/, data/, configs/) lives in the sibling
-    #    karpaai/recipe repo; eval/, calibration/ stay in the protocol repo.
+    #    RalphLabsAI/recipe repo; eval/, calibration/ stay in the protocol repo.
     out_dir.mkdir(parents=True, exist_ok=True)
     workdir = out_dir / "workdir"
     if workdir.exists():
         shutil.rmtree(workdir)
     workdir.mkdir(parents=True)
-    from karpa_bootstrap import RECIPE_DIR
+    from ralph_bootstrap import RECIPE_DIR
     for sub in ("model", "recipe", "data", "configs"):
         src = RECIPE_DIR / sub
         if src.exists():
             shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
     for sub in ("eval", "calibration"):
-        src = karpa_root / sub
+        src = ralph_root / sub
         if src.exists():
             shutil.copytree(src, workdir / sub, dirs_exist_ok=True)
     # Copy required top-level files.
     for f in ("restricted_files.yaml",):
-        src = karpa_root / f
+        src = ralph_root / f
         if src.exists():
             shutil.copy2(src, workdir / f)
     if patch_text:
@@ -479,7 +479,7 @@ def _build_epoch_records(
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--karpa-root", type=Path, default=Path(__file__).resolve().parent.parent)
+    p.add_argument("--ralph-root", type=Path, default=Path(__file__).resolve().parent.parent)
     p.add_argument("--submission", type=Path, required=True, help="dir with patch.diff + proof_request.json")
     p.add_argument("--out-dir", type=Path, required=True)
     p.add_argument("--total-steps", type=int, default=None)
@@ -488,7 +488,7 @@ def main() -> None:
     args = p.parse_args()
 
     bundle = run_proof_test(
-        karpa_root=args.karpa_root,
+        ralph_root=args.ralph_root,
         submission_dir=args.submission,
         out_dir=args.out_dir,
         total_steps_override=args.total_steps,

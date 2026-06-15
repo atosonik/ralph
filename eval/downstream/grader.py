@@ -1,7 +1,7 @@
 """One-shot offline grader for the private hardness subset (B1).
 
 Computes per-item `gold_margin_bits` under a fixed reference model — typically
-a 50M-param Karpa baseline trained once at calibration time. The bottom 20%
+a 50M-param Ralph baseline trained once at calibration time. The bottom 20%
 of items by margin become the hardness subset that `private_hard.py`
 consumes via `select_hardness_subset` at scoring time.
 
@@ -247,7 +247,7 @@ def write_hardness_index_jsonl(index: HardnessIndex, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tmp.open("w") as f:
         header = {
-            "_meta": "karpa-hardness-index",
+            "_meta": "ralph-hardness-index",
             "version": index.version,
             "format": WRITER_FORMAT,
             "n_rows": len(index.rows),
@@ -279,10 +279,10 @@ def read_hardness_index_jsonl(path: Path) -> HardnessIndex:
         header = json.loads(lines[0])
     except json.JSONDecodeError as e:
         raise ValueError(f"header line is not valid JSON: {e}") from e
-    if header.get("_meta") != "karpa-hardness-index":
+    if header.get("_meta") != "ralph-hardness-index":
         raise ValueError(
             f"unexpected _meta marker {header.get('_meta')!r}; "
-            "is this a karpa hardness-index file?"
+            "is this a ralph hardness-index file?"
         )
     if header.get("format") != WRITER_FORMAT:
         raise ValueError(

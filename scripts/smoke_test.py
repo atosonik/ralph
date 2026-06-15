@@ -1,7 +1,7 @@
 """
 End-to-end smoke test.
 
-Runs the full Karpa Phase 0 flow:
+Runs the full Ralph Phase 0 flow:
   1. Reset chain + king.
   2. Miner A submits the baseline (empty patch) — auto-crowned as initial king.
   3. Miner B submits a patch that tweaks training hyperparameters.
@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
+import ralph_bootstrap  # noqa: F401  — injects RALPH_RECIPE_DIR
 from miner.submit import assemble_submission, request_handshake_nonce
 from proof.runner import run_proof_test
 from validator.router import process_submission
@@ -56,17 +56,17 @@ PATCH_LOWER_WD = """\
 """
 
 
-def _reset_state(karpa_root: Path) -> None:
+def _reset_state(ralph_root: Path) -> None:
     """Wipe chain + previous runs for a clean smoke test."""
     for p in ["chain", "runs/smoke_e2e"]:
-        path = karpa_root / p
+        path = ralph_root / p
         if path.exists():
             shutil.rmtree(path)
-    (karpa_root / "runs/smoke_e2e").mkdir(parents=True, exist_ok=True)
+    (ralph_root / "runs/smoke_e2e").mkdir(parents=True, exist_ok=True)
 
 
 def _submit_one(
-    karpa_root: Path,
+    ralph_root: Path,
     miner_hotkey: str,
     patch_text: str,
     seed: int,
@@ -74,8 +74,8 @@ def _submit_one(
     tier: str = "verified",
 ) -> dict:
     """Run the full miner → proof → validator → router flow for one submission."""
-    sub_dir = karpa_root / "runs/smoke_e2e" / f"sub_{label}"
-    proof_dir = karpa_root / "runs/smoke_e2e" / f"proof_{label}"
+    sub_dir = ralph_root / "runs/smoke_e2e" / f"sub_{label}"
+    proof_dir = ralph_root / "runs/smoke_e2e" / f"proof_{label}"
     sub_dir.mkdir(parents=True, exist_ok=True)
     patch_path = sub_dir / "patch.diff"
     patch_path.write_text(patch_text)
@@ -83,7 +83,7 @@ def _submit_one(
     import hashlib
     patch_hash = hashlib.sha256(patch_text.encode()).hexdigest()
 
-    nonce = request_handshake_nonce(karpa_root, miner_hotkey, patch_hash)
+    nonce = request_handshake_nonce(ralph_root, miner_hotkey, patch_hash)
     (sub_dir / "proof_request.json").write_text(json.dumps({
         "handshake_nonce": nonce,
         "seed": seed,
@@ -93,32 +93,32 @@ def _submit_one(
 
     print(f"\n--- [{label}] miner={miner_hotkey} tier={tier} ---")
     bundle = run_proof_test(
-        karpa_root=karpa_root,
+        ralph_root=ralph_root,
         submission_dir=sub_dir,
         out_dir=proof_dir,
         tier=tier,
     )
-    assemble_submission(karpa_root, miner_hotkey, sub_dir, proof_dir)
-    return process_submission(karpa_root, proof_dir, noise_floor_margin=0.05)
+    assemble_submission(ralph_root, miner_hotkey, sub_dir, proof_dir)
+    return process_submission(ralph_root, proof_dir, noise_floor_margin=0.05)
 
 
 def main() -> None:
-    karpa_root = Path(__file__).resolve().parent.parent
-    _reset_state(karpa_root)
+    ralph_root = Path(__file__).resolve().parent.parent
+    _reset_state(ralph_root)
 
     print("=" * 60)
-    print("KARPA PHASE 0 — END-TO-END SMOKE TEST")
+    print("RALPH PHASE 0 — END-TO-END SMOKE TEST")
     print("=" * 60)
 
     # Miner A submits the baseline (empty patch).
-    res_a = _submit_one(karpa_root, "5MinerA_baseline", "", seed=42, label="A_baseline")
+    res_a = _submit_one(ralph_root, "5MinerA_baseline", "", seed=42, label="A_baseline")
     print(f"\n[A] status={res_a['status']}")
     print(f"    val_bpb={res_a['result']['hidden_eval']['val_bpb']:.4f}")
     print(f"    accepted_as_king={res_a['event']['accepted_as_king']}")
 
     # Miner B submits a patch (verified tier).
     res_b = _submit_one(
-        karpa_root,
+        ralph_root,
         "5MinerB_raise_lr",
         PATCH_RAISE_LR,
         seed=43,
@@ -132,7 +132,7 @@ def main() -> None:
 
     # Miner C submits a different patch (UNVERIFIED tier — no attestation, α=0.5).
     res_c = _submit_one(
-        karpa_root,
+        ralph_root,
         "5MinerC_unverified",
         PATCH_LOWER_WD,
         seed=44,
@@ -146,8 +146,8 @@ def main() -> None:
     print(f"    cost_effective={res_c['score']['compute_cost_effective']:.6f} (2× raw due to α=0.5)")
 
     # Print the chain state.
-    king_path = karpa_root / "chain" / "king.json"
-    events_path = karpa_root / "chain" / "events.jsonl"
+    king_path = ralph_root / "chain" / "king.json"
+    events_path = ralph_root / "chain" / "events.jsonl"
     print("\n" + "=" * 60)
     print("FINAL CHAIN STATE")
     print("=" * 60)

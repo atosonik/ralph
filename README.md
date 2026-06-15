@@ -1,16 +1,16 @@
-<img src="docs/assets/karpa-header.jpg" alt="Karpa — decentralized · autonomous · AI research" />
+<img src="docs/assets/ralph-header.jpg" alt="Ralph — decentralized · autonomous · AI research" />
 
 A Bittensor subnet for decentralized, autonomous AI research. An open,
 continuously improving training recipe — and the public knowledge corpus
 behind it — built by an autonomous research network on Bittensor.
 
-🌐 [karpa.ai](https://karpa.ai) · 📄 [Whitepaper v1.2](docs/Karpa-Whitepaper-v1.2.pdf) · 🏷️ [Releases](https://github.com/karpaai/karpa/releases) · 📊 [Wandb](https://wandb.ai/karpaai-hub/karpa) · 💬 [Discussions](https://github.com/orgs/karpaai/discussions)
+🌐 [ralphlabs.ai](https://ralphlabs.ai) · 📄 [Whitepaper v1.2](docs/Ralph-Whitepaper-v1.2.pdf) · 🏷️ [Releases](https://github.com/RalphLabsAI/ralph/releases) · 📊 [Wandb](https://wandb.ai/ralphlabs-hub/ralph) · 💬 [Discussions](https://github.com/orgs/RalphLabsAI/discussions)
 
-## What Karpa produces
+## What Ralph produces
 
 1. **A canonical training recipe** — a Git repo containing the best-known open recipe for each track (model class × objective). Anyone can clone it and train a model with state-of-the-art settings.
 2. **A public experiment-record corpus** — every submission the network has ever processed, including verified negative results. Searchable, citable, openly licensed.
-3. **A demonstration model lineage** — Karpa-1, -2, … — open-weights reference models proving the recipe works and the improvement compounds.
+3. **A demonstration model lineage** — Ralph-1, -2, … — open-weights reference models proving the recipe works and the improvement compounds.
 
 The subnet and its token fund the production of these artifacts. They are not the deliverable.
 
@@ -19,12 +19,12 @@ The subnet and its token fund the production of these artifacts. They are not th
 | Phase | Status | Key results |
 |---|---|---|
 | **0 — MVP** | ✅ Complete | End-to-end protocol on CPU: model, training, eval, proof-test, validator, scoring, king-change cycle |
-| **0.5 — H100** | ✅ Complete ([`v0.5.0`](https://github.com/karpaai/karpa/releases/tag/v0.5.0) · [results](https://github.com/orgs/karpaai/discussions/4)) | Real data (1B tokens FineWeb-Edu), noise floor measured (2σ = 0.013 val_bpb), Karpa-1 trained (254M params, loss 3.82) |
-| **0.5b — Optimization** | ✅ Complete ([`v0.5.1`](https://github.com/karpaai/karpa/releases/tag/v0.5.1)) | bf16: 3.8× throughput (63K tok/s), same loss. wandb live monitoring, Streamlit dashboard, wandb metrics export in proof bundles |
+| **0.5 — H100** | ✅ Complete ([`v0.5.0`](https://github.com/RalphLabsAI/ralph/releases/tag/v0.5.0) · [results](https://github.com/orgs/RalphLabsAI/discussions/4)) | Real data (1B tokens FineWeb-Edu), noise floor measured (2σ = 0.013 val_bpb), Ralph-1 trained (254M params, loss 3.82) |
+| **0.5b — Optimization** | ✅ Complete ([`v0.5.1`](https://github.com/RalphLabsAI/ralph/releases/tag/v0.5.1)) | bf16: 3.8× throughput (63K tok/s), same loss. wandb live monitoring, Streamlit dashboard, wandb metrics export in proof bundles |
 | **0.5c — Attestation** | ✅ Code-complete | Real TDX + nvtrust attestation module: auto-detects CC hardware, falls back to mock. Untested on real CC (needs Azure NCC / GCP A3-Confidential) |
-| **0.5d — Testnet** | ✅ Complete ([`v0.6.0`](https://github.com/karpaai/karpa/releases/tag/v0.6.0)) | Bittensor testnet (netuid 16): two miners competed, validator set weights on-chain, king changed. Chain abstraction layer with rate-limit handling. |
+| **0.5d — Testnet** | ✅ Complete ([`v0.6.0`](https://github.com/RalphLabsAI/ralph/releases/tag/v0.6.0)) | Bittensor testnet (netuid 16): two miners competed, validator set weights on-chain, king changed. Chain abstraction layer with rate-limit handling. |
 | **1.0 — Launch** | Planned | Register subnet, open to external miners, first bounty pilot |
-| **1.1 — SDK** | Planned | `pip install karpa-subnet` on PyPI, CI/CD, changelog, semver |
+| **1.1 — SDK** | Planned | `pip install ralph-subnet` on PyPI, CI/CD, changelog, semver |
 | **1.2 — Docs** | Planned | Documentation site, miner/validator quickstart guides, corpus query tutorials |
 
 ## Architecture (three layers)
@@ -38,7 +38,7 @@ The subnet and its token fund the production of these artifacts. They are not th
                        │ candidate patch
 ┌──────────────────────▼──────────────────────────────┐
 │  Layer 2 — Canonical proof test                     │
-│  Official Karpa Docker on miner's GPU.              │
+│  Official Ralph Docker on miner's GPU.              │
 │  Applies patch to canonical recipe, trains under    │
 │  fixed (seed, data, config), produces checkpoint +  │
 │  training log + calibration + attestation chain.    │
@@ -55,12 +55,12 @@ The subnet and its token fund the production of these artifacts. They are not th
 
 ## Repo layout
 
-Karpa lives across **two repos**:
+Ralph lives across **two repos**:
 
 | Repo | What | Patchable by miners? |
 |---|---|---|
-| **[karpaai/recipe](https://github.com/karpaai/recipe)** | `model/`, `recipe/`, `configs/`, `data/` — the canonical training recipe miners patch and the merged history of accepted improvements | **Yes** |
-| **karpaai/karpa** (this repo) | Protocol: validator, proof-test runner, attestation, scoring, submission tooling | **No** (restricted) |
+| **[RalphLabsAI/recipe](https://github.com/RalphLabsAI/recipe)** | `model/`, `recipe/`, `configs/`, `data/` — the canonical training recipe miners patch and the merged history of accepted improvements | **Yes** |
+| **RalphLabsAI/ralph** (this repo) | Protocol: validator, proof-test runner, attestation, scoring, submission tooling | **No** (restricted) |
 
 ### This repo (protocol)
 
@@ -72,11 +72,11 @@ Karpa lives across **two repos**:
 | `miner/` | Submission bundle assembly, HuggingFace upload, hotkey signing |
 | `validator/` | Four cheap ops + scoring + Stage 5 audit |
 | `chain_layer/` | Bittensor + local-JSON chain abstractions |
-| `dashboard/` | Karpa Live — Streamlit monitoring dashboard |
+| `dashboard/` | Ralph Live — Streamlit monitoring dashboard |
 | `scripts/` | `miner_run.py`, `run_h100.sh`, `noise_floor.py`, `smoke_test.py`, `gpu.py` |
-| `karpa_bootstrap.py` | Adds the sibling recipe repo to `sys.path` for protocol code |
+| `ralph_bootstrap.py` | Adds the sibling recipe repo to `sys.path` for protocol code |
 
-The protocol code locates the recipe via `$KARPA_RECIPE_DIR` (defaults to `../recipe`). Clone both repos side-by-side and everything just works.
+The protocol code locates the recipe via `$RALPH_RECIPE_DIR` (defaults to `../recipe`). Clone both repos side-by-side and everything just works.
 
 ## Quick start
 
@@ -84,9 +84,9 @@ The protocol code locates the recipe via `$KARPA_RECIPE_DIR` (defaults to `../re
 
 ```bash
 # Clone both repos side-by-side
-git clone https://github.com/karpaai/karpa.git
-git clone https://github.com/karpaai/recipe.git
-cd karpa
+git clone https://github.com/RalphLabsAI/ralph.git
+git clone https://github.com/RalphLabsAI/recipe.git
+cd ralph
 python3 -m venv .venv && source .venv/bin/activate
 pip install torch numpy tiktoken cryptography
 
@@ -101,14 +101,14 @@ python scripts/smoke_test.py
 ### H100 full run (real data)
 
 ```bash
-git clone https://github.com/karpaai/karpa.git
-git clone https://github.com/karpaai/recipe.git
-cd karpa
+git clone https://github.com/RalphLabsAI/ralph.git
+git clone https://github.com/RalphLabsAI/recipe.git
+cd ralph
 bash scripts/run_h100.sh
 ```
 
 This bootstraps everything on a fresh H100: FineWeb-Edu data prep (1B tokens),
-calibration benchmark, noise floor (10 seeds), and Karpa-1 training
+calibration benchmark, noise floor (10 seeds), and Ralph-1 training
 (254M params, ~262M tokens). Wall-clock: ~6-7 hours (fp32).
 
 ### Live monitoring
@@ -118,7 +118,7 @@ calibration benchmark, noise floor (10 seeds), and Karpa-1 training
 python -m recipe.train --config configs/h100_default.json --out-dir runs/my_run --wandb
 
 # Streamlit dashboard (network status, king history, submissions)
-pip install 'karpa-subnet[dashboard]'
+pip install 'ralph-subnet[dashboard]'
 streamlit run dashboard/app.py
 ```
 
@@ -139,11 +139,11 @@ the unverified tier is expected to be deprecated.
 |---|---|
 | H100 calibration (matmul) | 0.512 ms |
 | Noise floor (10 seeds, 125M model) | σ = 0.006 val_bpb, margin (2σ) = 0.013 |
-| Karpa-1 fp32 (254M params, 262M tokens) | Final loss = 3.82, 16.9K tok/s, 259 min |
-| Karpa-1 bf16 (same model, same data) | Final loss = 3.82, **63.4K tok/s, 69 min (3.8× faster)** |
+| Ralph-1 fp32 (254M params, 262M tokens) | Final loss = 3.82, 16.9K tok/s, 259 min |
+| Ralph-1 bf16 (same model, same data) | Final loss = 3.82, **63.4K tok/s, 69 min (3.8× faster)** |
 
-Full results: [Phase 0.5 Discussion](https://github.com/orgs/karpaai/discussions/4) ·
-Release: [`v0.5.0`](https://github.com/karpaai/karpa/releases/tag/v0.5.0)
+Full results: [Phase 0.5 Discussion](https://github.com/orgs/RalphLabsAI/discussions/4) ·
+Release: [`v0.5.0`](https://github.com/RalphLabsAI/ralph/releases/tag/v0.5.0)
 
 ## License
 

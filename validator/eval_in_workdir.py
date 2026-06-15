@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Subprocess helper for op4_hidden_eval's patched-model fallback.
 
-When a miner submits a structural patch that ADDS new parameters to KarpaBase
+When a miner submits a structural patch that ADDS new parameters to RalphBase
 (e.g. QK-Norm adding q_norm/k_norm weights), the validator's canonical
-KarpaBase rejects the checkpoint at load_state_dict time. This script is
+RalphBase rejects the checkpoint at load_state_dict time. This script is
 spawned in that case: it imports the PATCHED model from a workdir where the
 patch has already been applied, instantiates the model, loads the state_dict
 strict, runs hidden_eval, and prints the result for the parent to parse.
@@ -11,10 +11,10 @@ strict, runs hidden_eval, and prints the result for the parent to parse.
 Args (positional):
   1. workdir   — directory containing the patched recipe tree (model/, eval/, ...)
   2. ckpt_path — path to the miner's checkpoint.pt
-  3. karpa_root — repo root (for eval/ data location if not in workdir)
+  3. ralph_root — repo root (for eval/ data location if not in workdir)
 
 Output (stdout, last line):
-  KARPA_EVAL_RESULT val_bpb=<float> benchmark_acc=<float>
+  RALPH_EVAL_RESULT val_bpb=<float> benchmark_acc=<float>
 
 Exit codes:
   0  — eval ran successfully (result line printed)
@@ -31,11 +31,11 @@ from pathlib import Path
 
 def main() -> int:
     if len(sys.argv) != 4:
-        print(f"ERROR: usage: {sys.argv[0]} <workdir> <ckpt_path> <karpa_root>", file=sys.stderr)
+        print(f"ERROR: usage: {sys.argv[0]} <workdir> <ckpt_path> <ralph_root>", file=sys.stderr)
         return 3
     workdir = Path(sys.argv[1]).resolve()
     ckpt_path = Path(sys.argv[2]).resolve()
-    karpa_root = Path(sys.argv[3]).resolve()
+    ralph_root = Path(sys.argv[3]).resolve()
 
     if not workdir.is_dir():
         print(f"ERROR: workdir {workdir} not a directory", file=sys.stderr)
@@ -45,15 +45,15 @@ def main() -> int:
         return 3
 
     # Put the workdir FIRST on sys.path so its patched `model/` package wins
-    # over any model package that lives under karpa_root or its installed
-    # parent. The karpa_root entry is appended so eval/ + dependencies still
+    # over any model package that lives under ralph_root or its installed
+    # parent. The ralph_root entry is appended so eval/ + dependencies still
     # resolve when the workdir doesn't include them.
     sys.path.insert(0, str(workdir))
-    sys.path.insert(1, str(karpa_root))
+    sys.path.insert(1, str(ralph_root))
 
     try:
         import torch
-        from model import KarpaBase, KarpaConfig
+        from model import RalphBase, RalphConfig
 
         from eval import run_hidden_eval
     except Exception as e:
@@ -84,7 +84,7 @@ def main() -> int:
         for k, v in saved.items():
             if k in cfg_kwargs or k in ("rms_norm_eps", "rope_theta", "tie_embeddings"):
                 cfg_kwargs.setdefault(k, v)
-        cfg = KarpaConfig(**{k: v for k, v in cfg_kwargs.items() if k in KarpaConfig.__dataclass_fields__})
+        cfg = RalphConfig(**{k: v for k, v in cfg_kwargs.items() if k in RalphConfig.__dataclass_fields__})
         ckpt = torch.load(ckpt_path, weights_only=True, map_location="cpu")
         state_dict = ckpt.get("model", ckpt)
     except Exception as e:
@@ -92,7 +92,7 @@ def main() -> int:
         return 1
 
     try:
-        model = KarpaBase(cfg)
+        model = RalphBase(cfg)
         model.load_state_dict(state_dict)
     except Exception as e:
         print(f"ERROR: patched model state_dict load failed: {e}", file=sys.stderr)
@@ -102,14 +102,14 @@ def main() -> int:
         model = model.cuda()
 
     try:
-        eval_root = workdir if (workdir / "eval" / "private").is_dir() else karpa_root
+        eval_root = workdir if (workdir / "eval" / "private").is_dir() else ralph_root
         result = run_hidden_eval(model, eval_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
     except Exception as e:
         print(f"ERROR: hidden_eval crashed: {e}", file=sys.stderr)
         return 2
 
     print(
-        f"KARPA_EVAL_RESULT val_bpb={result.val_bpb:.6f} "
+        f"RALPH_EVAL_RESULT val_bpb={result.val_bpb:.6f} "
         f"benchmark_acc={result.benchmark_accuracy:.6f} "
         f"tokens_evaluated={result.tokens_evaluated} "
         f"benchmark_examples={result.benchmark_examples} "

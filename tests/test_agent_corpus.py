@@ -10,12 +10,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from miner import agent_corpus, agent_memory
 
 
 @pytest.fixture
-def fake_karpa_root(tmp_path, monkeypatch):
+def fake_ralph_root(tmp_path, monkeypatch):
     """Redirect every path agent_corpus uses to a tmp_path tree."""
     monkeypatch.setattr(agent_corpus, "CHAIN_DIR", tmp_path / "chain")
     monkeypatch.setattr(agent_corpus, "QUEUE_DIR", tmp_path / "queue")
@@ -25,12 +25,12 @@ def fake_karpa_root(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def test_get_king_none_when_absent(fake_karpa_root):
+def test_get_king_none_when_absent(fake_ralph_root):
     assert agent_corpus.get_king() is None
 
 
-def test_get_king_reads_file(fake_karpa_root):
-    (fake_karpa_root / "chain" / "king.json").write_text(json.dumps({
+def test_get_king_reads_file(fake_ralph_root):
+    (fake_ralph_root / "chain" / "king.json").write_text(json.dumps({
         "miner_hotkey": "5F23x",
         "bundle_hash": "abc",
         "val_bpb": 1.5109,
@@ -44,8 +44,8 @@ def test_get_king_reads_file(fake_karpa_root):
     assert k.val_bpb == 1.5109
 
 
-def test_get_king_lineage_walks_chain(fake_karpa_root):
-    (fake_karpa_root / "chain" / "king.json").write_text(json.dumps({
+def test_get_king_lineage_walks_chain(fake_ralph_root):
+    (fake_ralph_root / "chain" / "king.json").write_text(json.dumps({
         "miner_hotkey": "k3",
         "bundle_hash": "h3",
         "val_bpb": 1.0,
@@ -65,23 +65,23 @@ def test_get_king_lineage_walks_chain(fake_karpa_root):
     assert [k.miner_hotkey for k in lineage] == ["k3", "k2", "k1"]
 
 
-def test_get_king_lineage_max_depth(fake_karpa_root):
+def test_get_king_lineage_max_depth(fake_ralph_root):
     inner = {"miner_hotkey": "k0", "bundle_hash": "h0", "val_bpb": 9.0,
              "benchmark_accuracy": 0.0, "compute_cost_h100h": 0.0, "crowned_at": 0.0}
     chain = inner
     for i in range(20):
         chain = {**inner, "miner_hotkey": f"k{i}", "previous_king": chain}
-    (fake_karpa_root / "chain" / "king.json").write_text(json.dumps(chain))
+    (fake_ralph_root / "chain" / "king.json").write_text(json.dumps(chain))
     lineage = agent_corpus.get_king_lineage(max_depth=5)
     assert len(lineage) == 5
 
 
-def test_read_events_empty(fake_karpa_root):
+def test_read_events_empty(fake_ralph_root):
     assert agent_corpus.read_events() == []
 
 
-def test_recent_king_changes(fake_karpa_root):
-    events_path = fake_karpa_root / "chain" / "events.jsonl"
+def test_recent_king_changes(fake_ralph_root):
+    events_path = fake_ralph_root / "chain" / "events.jsonl"
     events = [
         {"type": "submission_scored", "classification": "king_change", "miner_hotkey": "x", "val_bpb": 1.5},
         {"type": "submission_scored", "classification": "plain_failure", "miner_hotkey": "y", "val_bpb": 2.0},
@@ -94,8 +94,8 @@ def test_recent_king_changes(fake_karpa_root):
     assert [e["miner_hotkey"] for e in kc] == ["x", "z"]
 
 
-def test_recent_meaningful_failures(fake_karpa_root):
-    mf_root = fake_karpa_root / "queue" / "meaningful_failure"
+def test_recent_meaningful_failures(fake_ralph_root):
+    mf_root = fake_ralph_root / "queue" / "meaningful_failure"
     for i in range(3):
         d = mf_root / f"bundle_{i:02d}"
         d.mkdir()
@@ -106,8 +106,8 @@ def test_recent_meaningful_failures(fake_karpa_root):
     assert all("Hypothesis" in m.rationale_text for m in mfs)
 
 
-def test_recent_meaningful_failures_skips_oversize(fake_karpa_root):
-    mf_root = fake_karpa_root / "queue" / "meaningful_failure"
+def test_recent_meaningful_failures_skips_oversize(fake_ralph_root):
+    mf_root = fake_ralph_root / "queue" / "meaningful_failure"
     d = mf_root / "huge"
     d.mkdir()
     (d / "rationale.md").write_text("x" * 300_000)  # > 200KB cap
@@ -115,13 +115,13 @@ def test_recent_meaningful_failures_skips_oversize(fake_karpa_root):
     assert mfs == []
 
 
-def test_recent_meaningful_failures_skips_missing_rationale(fake_karpa_root):
-    mf_root = fake_karpa_root / "queue" / "meaningful_failure"
+def test_recent_meaningful_failures_skips_missing_rationale(fake_ralph_root):
+    mf_root = fake_ralph_root / "queue" / "meaningful_failure"
     (mf_root / "no_rationale").mkdir()
     assert agent_corpus.recent_meaningful_failures() == []
 
 
-def test_list_tried_axes_recent_filters_old(fake_karpa_root):
+def test_list_tried_axes_recent_filters_old(fake_ralph_root):
     now = time.time()
     agent_memory.append_memory("a", {
         "ts": now - 30 * 86400, "round": 1, "axis": "old_axis", "parameter": "x",
@@ -142,15 +142,15 @@ def test_noise_floor_constant():
     assert agent_corpus.get_noise_floor() == 0.013
 
 
-def test_format_for_prompt_minimal(fake_karpa_root):
+def test_format_for_prompt_minimal(fake_ralph_root):
     # No king, no events, no failures, no memory — should still produce valid output
     p = agent_corpus.format_for_prompt("a")
     assert "No king crowned yet" in p
     assert "Noise floor" in p
 
 
-def test_format_for_prompt_full(fake_karpa_root):
-    (fake_karpa_root / "chain" / "king.json").write_text(json.dumps({
+def test_format_for_prompt_full(fake_ralph_root):
+    (fake_ralph_root / "chain" / "king.json").write_text(json.dumps({
         "miner_hotkey": "5F23xxxxxxxxxxx",
         "bundle_hash": "abc123def456",
         "val_bpb": 1.5,
@@ -158,7 +158,7 @@ def test_format_for_prompt_full(fake_karpa_root):
         "compute_cost_h100h": 0.0003,
         "crowned_at": time.time(),
     }))
-    mf = fake_karpa_root / "queue" / "meaningful_failure" / "mfbundle1"
+    mf = fake_ralph_root / "queue" / "meaningful_failure" / "mfbundle1"
     mf.mkdir()
     (mf / "rationale.md").write_text("# Lion test\n\nLion needs more warmup.")
     agent_memory.append_memory("a", {

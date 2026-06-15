@@ -93,7 +93,7 @@ def compute_container_measurement(source_files: Sequence[Path]) -> str:
 
     DEPRECATED interface — kept for backward compatibility with old call sites
     that pass a list of absolute Paths. New code should use
-    proof.sources.compute_container_measurement(karpa_root, recipe_dir=...)
+    proof.sources.compute_container_measurement(ralph_root, recipe_dir=...)
     which hashes repo-relative POSIX paths so different filesystem layouts
     produce the same digest. See deep_review_2026-05-31 critical #10/#11.
     """

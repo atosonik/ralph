@@ -22,7 +22,7 @@ The 4 tasks are pinned at:
 Provenance of this 4-task set: `docs/license/hardness_subset_decision.md`
 (2026-06-10 decision; closed B1-D1, pre-swap of OpenBookQA + SciQ which
 were CC-BY-NC and therefore incompatible with the protocol's commercial
-emission use). Per B1-D11, this subset is bundled into Karpa's eval
+emission use). Per B1-D11, this subset is bundled into Ralph's eval
 surface but is NOT yet part of the attested container measurement — the
 container bump is a mainnet-activation deliverable, not B1's.
 
@@ -82,7 +82,7 @@ PRIVATE_HARD_TASKS: tuple[str, ...] = (
     "tiny_arc",
     "tiny_mmlu",
 )
-"""The 4 tasks in the private hardness subset, in canonical Karpa order.
+"""The 4 tasks in the private hardness subset, in canonical Ralph order.
 
 Suffix conventions: `_hard` for bottom-quintile-by-margin filters of
 public datasets; `tiny_*` for the tinyBenchmarks-curated IRT++ subsets
@@ -131,7 +131,7 @@ class HardnessIndexRow:
     """One row in the hardness index `parquet` grader.py produces.
 
     `gold_margin_bits` is `log_p(gold) - max_{d != gold} log_p(d)` under a
-    fixed reference model (a 50M-param Karpa baseline run once at
+    fixed reference model (a 50M-param Ralph baseline run once at
     calibration time). Smaller margin → harder item; the bottom 20% by
     margin are selected as the hardness subset.
 
@@ -391,7 +391,7 @@ def load_task_examples(
     id is preserved in the returned tuples so
     `select_hardness_subset` can filter by the HardnessIndex.
 
-    JSONL schema (canonical Karpa form):
+    JSONL schema (canonical Ralph form):
       * mc:     {"id": str, "query": str, "choices": [str, ...], "gold": int}
       * schema: {"id": str, "contexts": [str, ...],
                  "continuations": [str, ...], "gold": int}

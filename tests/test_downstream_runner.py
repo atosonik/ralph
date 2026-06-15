@@ -24,7 +24,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream.core22 import (
     LMRawRow,
     MCRawRow,
@@ -35,7 +35,7 @@ from eval.downstream.private_hard import (
     HardnessIndexRow,
 )
 from eval.downstream.runner import (
-    KARPA_VOCAB_SIZE,
+    RALPH_VOCAB_SIZE,
     EvalConfig,
     check_vocab_compatibility,
     run_downstream_eval,
@@ -150,7 +150,7 @@ class TestVocabCheck:
         check_vocab_compatibility(50257)  # no raise
 
     def test_pass_at_constant(self):
-        check_vocab_compatibility(KARPA_VOCAB_SIZE)
+        check_vocab_compatibility(RALPH_VOCAB_SIZE)
 
     def test_reject_smaller(self):
         with pytest.raises(ValueError, match=r"vocab_size mismatch"):

@@ -17,8 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
-from eval.downstream.runner import KARPA_VOCAB_SIZE
+import ralph_bootstrap  # noqa: F401
+from eval.downstream.runner import RALPH_VOCAB_SIZE
 from eval.downstream.runner_subprocess import EvalSubprocessError
 from eval.downstream.types import (
     HARNESS_VERSION,
@@ -44,7 +44,7 @@ _TEST_COMMAND_PREFIX = (sys.executable, str(_TEST_ENTRY))
 @pytest.fixture(autouse=True)
 def _set_test_runner_mode(monkeypatch):
     """Default the synthetic entry to success mode for the eval-driver tests."""
-    monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "success")
+    monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "success")
     yield
 
 
@@ -55,7 +55,7 @@ def _genesis_submission() -> Submission:
         branch_id="main",
         bundle_hash="bh_test",
         miner_hotkey="5F_test",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
 
 
@@ -230,7 +230,7 @@ class TestRunLadderEvalV011:
             _genesis_submission(),
             cfg,
             checkpoint_path=ckpt,
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             command_prefix=_TEST_COMMAND_PREFIX,
             timeout_s_per_rung=15.0,
         )
@@ -243,8 +243,8 @@ class TestRunLadderEvalV011:
         assert result.hidden_eval.downstream.cells == result.combined_report.cells
 
     def test_subprocess_failure_propagates(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "nonzero")
-        monkeypatch.setenv("KARPA_TEST_RUNNER_EXIT_CODE", "9")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "nonzero")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_EXIT_CODE", "9")
         cfg = _single_rung_config(tmp_path)
         ckpt = tmp_path / "fake.ckpt"
         ckpt.write_bytes(b"")
@@ -253,7 +253,7 @@ class TestRunLadderEvalV011:
                 _genesis_submission(),
                 cfg,
                 checkpoint_path=ckpt,
-                karpa_root=tmp_path,
+                ralph_root=tmp_path,
                 command_prefix=_TEST_COMMAND_PREFIX,
                 timeout_s_per_rung=15.0,
             )
@@ -268,7 +268,7 @@ class TestRunLadderEvalV011:
                 _genesis_submission(),
                 cfg,
                 checkpoint_path=ckpt,
-                karpa_root=tmp_path,
+                ralph_root=tmp_path,
                 mode="not_a_mode",
             )
 
@@ -289,7 +289,7 @@ class TestRunLadderEvalLegacy:
             _genesis_submission(),
             cfg,
             checkpoint_path=ckpt,
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             mode=EVAL_MODE_LEGACY,
             command_prefix=[sys.executable, "-c", "import sys; sys.exit(1)"],
             legacy_val_bpb=1.234,
@@ -314,7 +314,7 @@ class TestRunLadderEvalLegacy:
             _genesis_submission(),
             cfg,
             checkpoint_path=ckpt,
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             mode=EVAL_MODE_LEGACY,
             legacy_val_bpb=2.0,
             legacy_benchmark_accuracy=0.3,
@@ -341,7 +341,7 @@ class TestRunLadderEvalLegacy:
             _genesis_submission(),
             cfg,
             checkpoint_path=ckpt,
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             mode=EVAL_MODE_V011,
             command_prefix=_TEST_COMMAND_PREFIX,
             timeout_s_per_rung=15.0,

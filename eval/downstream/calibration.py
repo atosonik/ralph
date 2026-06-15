@@ -200,7 +200,7 @@ def aggregate_noise_floors(
 # ----------------------------------------------------------------------------
 
 
-_META_MARKER = "karpa-noise-floor-table"
+_META_MARKER = "ralph-noise-floor-table"
 
 
 def write_noise_floor_table_json(
@@ -217,7 +217,7 @@ def write_noise_floor_table_json(
 
     Schema:
       {
-        "_meta": "karpa-noise-floor-table",
+        "_meta": "ralph-noise-floor-table",
         "harness_version": "...",
         "recipe_sha": "...",
         "n_baselines": <int>,

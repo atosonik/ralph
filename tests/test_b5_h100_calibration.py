@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream.calibration import read_noise_floor_table_json
 from scripts.b5_h100_calibration import (
     DEFAULT_N_BASELINES,
@@ -32,7 +32,7 @@ _TEST_COMMAND_PREFIX = (sys.executable, str(_TEST_ENTRY))
 
 @pytest.fixture(autouse=True)
 def _clear_test_mode(monkeypatch):
-    monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "success")
+    monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "success")
     yield
 
 
@@ -46,7 +46,7 @@ def test_calibration_happy_path_writes_table(tmp_path):
     ckpt = tmp_path / "baseline.pt"
     ckpt.write_bytes(b"")
     summary = run_calibration(
-        karpa_root=tmp_path,
+        ralph_root=tmp_path,
         baseline_checkpoint=ckpt,
         bundle_dir=tmp_path / "bundle",
         bundle_sha256="test-sha",
@@ -81,12 +81,12 @@ def test_calibration_handles_partial_failure(tmp_path, monkeypatch):
     # on seed=2. We can't easily switch envs per-call without monkey-
     # patching subprocess.run, so we use the "nonzero" mode for ALL
     # baselines and verify the failure surfaces.
-    monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "nonzero")
-    monkeypatch.setenv("KARPA_TEST_RUNNER_EXIT_CODE", "5")
+    monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "nonzero")
+    monkeypatch.setenv("RALPH_TEST_RUNNER_EXIT_CODE", "5")
 
     with pytest.raises(RuntimeError, match=r"0 of 3 baselines succeeded"):
         run_calibration(
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             baseline_checkpoint=ckpt,
             bundle_dir=tmp_path / "bundle",
             bundle_sha256="x",
@@ -104,7 +104,7 @@ def test_calibration_seeds_length_mismatch_rejected(tmp_path):
     ckpt.write_bytes(b"")
     with pytest.raises(ValueError, match=r"seeds given"):
         run_calibration(
-            karpa_root=tmp_path,
+            ralph_root=tmp_path,
             baseline_checkpoint=ckpt,
             bundle_dir=tmp_path,
             bundle_sha256="x",
@@ -122,7 +122,7 @@ def test_calibration_custom_seeds_propagate(tmp_path):
     ckpt = tmp_path / "b.pt"
     ckpt.write_bytes(b"")
     summary = run_calibration(
-        karpa_root=tmp_path,
+        ralph_root=tmp_path,
         baseline_checkpoint=ckpt,
         bundle_dir=tmp_path / "bundle",
         bundle_sha256="x",
@@ -151,7 +151,7 @@ class TestCli:
     def test_minimal_required(self, tmp_path):
         parser = _build_parser()
         args = parser.parse_args([
-            "--karpa-root", str(tmp_path),
+            "--ralph-root", str(tmp_path),
             "--baseline-checkpoint", str(tmp_path / "b.pt"),
             "--bundle-dir", str(tmp_path / "bundle"),
             "--bundle-sha-sha256", "abc",
@@ -165,7 +165,7 @@ class TestCli:
     def test_multiple_tasks_via_repeat(self, tmp_path):
         parser = _build_parser()
         args = parser.parse_args([
-            "--karpa-root", str(tmp_path),
+            "--ralph-root", str(tmp_path),
             "--baseline-checkpoint", str(tmp_path / "b.pt"),
             "--bundle-dir", str(tmp_path / "bundle"),
             "--bundle-sha-sha256", "x",

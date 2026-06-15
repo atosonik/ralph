@@ -3,7 +3,7 @@
 Drives the caller-side wrapper through every documented failure mode
 plus the happy path. Uses tests/_runner_subprocess_test_entry.py as a
 synthetic CLI controlled by env vars so each test can deterministically
-exercise one path without needing a real KarpaBase checkpoint or DCLM
+exercise one path without needing a real RalphBase checkpoint or DCLM
 bundle.
 
 Covers:
@@ -30,7 +30,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream.runner import EvalConfig
 from eval.downstream.runner_subprocess import (
     DEFAULT_COMMAND_PREFIX,
@@ -174,7 +174,7 @@ class TestDefaultCommandPrefix:
 
 class TestHappyPath:
     def test_returns_downstream_report(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "success")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "success")
         report = run_eval_in_subprocess(
             checkpoint_path=tmp_path / "fake.ckpt",
             config=_make_config(),
@@ -192,7 +192,7 @@ class TestHappyPath:
 
     def test_config_serialized_to_work_dir(self, tmp_path, monkeypatch):
         """The wrapper must write config.json before invoking subprocess."""
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "success")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "success")
         work = tmp_path / "work"
         run_eval_in_subprocess(
             checkpoint_path=tmp_path / "fake.ckpt",
@@ -213,7 +213,7 @@ class TestHappyPath:
 
     def test_auto_tmpdir_cleaned_up(self, tmp_path, monkeypatch):
         """When output_dir is None, the wrapper allocates and removes a tmpdir."""
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "success")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "success")
         report = run_eval_in_subprocess(
             checkpoint_path=tmp_path / "fake.ckpt",
             config=_make_config(),
@@ -228,7 +228,7 @@ class TestHappyPath:
 
     def test_caller_owned_dir_preserved(self, tmp_path, monkeypatch):
         """Caller-passed output_dir is NOT removed on success."""
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "success")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "success")
         work = tmp_path / "preserved"
         run_eval_in_subprocess(
             checkpoint_path=tmp_path / "fake.ckpt",
@@ -304,7 +304,7 @@ class TestArgvConstruction:
         )
         assert "--hardness-index" not in argv
         assert "--patch" not in argv
-        assert "--karpa-root" not in argv
+        assert "--ralph-root" not in argv
 
     def test_optional_args_propagate_when_set(self, tmp_path):
         argv = self._capture_argv(
@@ -315,14 +315,14 @@ class TestArgvConstruction:
             vocab_size=50257,
             hardness_index_path=Path("/tmp/hard.jsonl"),
             patch_path=Path("/tmp/p.patch"),
-            karpa_root=Path("/tmp/root"),
+            ralph_root=Path("/tmp/root"),
             output_dir=tmp_path / "work",
         )
         hi_idx = argv.index("--hardness-index")
         assert argv[hi_idx + 1] == "/tmp/hard.jsonl"
         p_idx = argv.index("--patch")
         assert argv[p_idx + 1] == "/tmp/p.patch"
-        kr_idx = argv.index("--karpa-root")
+        kr_idx = argv.index("--ralph-root")
         assert argv[kr_idx + 1] == "/tmp/root"
 
     def test_default_command_prefix_used(self, tmp_path):
@@ -344,8 +344,8 @@ class TestArgvConstruction:
 
 class TestErrorPaths:
     def test_nonzero_exit_raises(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "nonzero")
-        monkeypatch.setenv("KARPA_TEST_RUNNER_EXIT_CODE", "7")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "nonzero")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_EXIT_CODE", "7")
         with pytest.raises(EvalSubprocessError) as exc_info:
             run_eval_in_subprocess(
                 checkpoint_path=tmp_path / "fake.ckpt",
@@ -363,7 +363,7 @@ class TestErrorPaths:
 
     def test_missing_output_raises(self, tmp_path, monkeypatch):
         """Subprocess exits 0 but doesn't write the output file."""
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "no_output")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "no_output")
         with pytest.raises(EvalSubprocessError) as exc_info:
             run_eval_in_subprocess(
                 checkpoint_path=tmp_path / "fake.ckpt",
@@ -378,7 +378,7 @@ class TestErrorPaths:
         assert exc_info.value.exit_code == 0
 
     def test_malformed_output_raises(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "malformed_output")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "malformed_output")
         with pytest.raises(EvalSubprocessError) as exc_info:
             run_eval_in_subprocess(
                 checkpoint_path=tmp_path / "fake.ckpt",
@@ -393,7 +393,7 @@ class TestErrorPaths:
         assert "JSON parse error" in exc_info.value.stderr_tail
 
     def test_schema_mismatch_raises(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "schema_mismatch")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "schema_mismatch")
         with pytest.raises(EvalSubprocessError) as exc_info:
             run_eval_in_subprocess(
                 checkpoint_path=tmp_path / "fake.ckpt",
@@ -408,7 +408,7 @@ class TestErrorPaths:
         assert "schema mismatch" in exc_info.value.stderr_tail
 
     def test_wrong_harness_version_raises(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "wrong_version")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "wrong_version")
         with pytest.raises(EvalSubprocessError) as exc_info:
             run_eval_in_subprocess(
                 checkpoint_path=tmp_path / "fake.ckpt",
@@ -423,8 +423,8 @@ class TestErrorPaths:
         assert "harness_version mismatch" in exc_info.value.stderr_tail
 
     def test_timeout_raises(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "slow")
-        monkeypatch.setenv("KARPA_TEST_RUNNER_SLEEP_S", "5")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "slow")
+        monkeypatch.setenv("RALPH_TEST_RUNNER_SLEEP_S", "5")
         with pytest.raises(EvalSubprocessError) as exc_info:
             run_eval_in_subprocess(
                 checkpoint_path=tmp_path / "fake.ckpt",
@@ -472,7 +472,7 @@ class TestEnvPropagation:
     def test_custom_env_passed_to_subprocess(self, tmp_path, monkeypatch):
         """When `env` is set, the subprocess sees ONLY that env (subprocess.run)."""
         custom = os.environ.copy()
-        custom["KARPA_TEST_RUNNER_MODE"] = "success"
+        custom["RALPH_TEST_RUNNER_MODE"] = "success"
         # The success mode requires importing eval.downstream.types — so the
         # subprocess needs PYTHONPATH / cwd to still work. os.environ.copy()
         # preserves PATH etc.; we only add the mode var.

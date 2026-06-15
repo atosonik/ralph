@@ -46,7 +46,7 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# --- Karpa: generated artifacts (never commit) ---
+# --- Ralph: generated artifacts (never commit) ---
 
 # Local "chain" state — Phase 0 stub for on-chain ledger. Per-environment.
 chain/

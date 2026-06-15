@@ -1,7 +1,7 @@
 """Tests for eval/downstream/runner_cli.py.
 
 The CLI's full end-to-end behaviour depends on:
-  * a real KarpaBase + KarpaConfig from the karpaai/recipe sibling
+  * a real RalphBase + RalphConfig from the RalphLabsAI/recipe sibling
   * a real DCLM bundle on disk
   * the load_task_examples stubs being implemented (B1-D1 follow-up)
 
@@ -29,7 +29,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream.runner_cli import (
     _build_parser,
     _build_task_loaders,
@@ -103,7 +103,7 @@ class TestBuildParser:
         ])
         assert args.hardness_index is None
         assert args.patch is None
-        assert args.karpa_root is None
+        assert args.ralph_root is None
 
     def test_optional_args_parse_to_paths(self):
         parser = _build_parser()
@@ -112,11 +112,11 @@ class TestBuildParser:
             "--bundle-sha", "x", "--bundle-dir", "x", "--vocab-size", "50257",
             "--hardness-index", "/tmp/hard.jsonl",
             "--patch", "/tmp/p.patch",
-            "--karpa-root", "/tmp/karpa",
+            "--ralph-root", "/tmp/ralph",
         ])
         assert args.hardness_index == Path("/tmp/hard.jsonl")
         assert args.patch == Path("/tmp/p.patch")
-        assert args.karpa_root == Path("/tmp/karpa")
+        assert args.ralph_root == Path("/tmp/ralph")
 
 
 # ============================================================================
@@ -244,7 +244,7 @@ class TestMainPatchHandling:
                 "--bundle-dir", "x",
                 "--vocab-size", "50257",
                 "--patch", "/tmp/p.patch",
-                "--karpa-root", "/tmp/root",
+                "--ralph-root", "/tmp/root",
             ])
 
     def test_no_patch_passes_through(self, tmp_path):
@@ -277,8 +277,8 @@ class TestMainPatchHandling:
 # ============================================================================
 
 
-class _FakeKarpaConfig:
-    """Stand-in for KarpaConfig with a __dataclass_fields__ surface."""
+class _FakeRalphConfig:
+    """Stand-in for RalphConfig with a __dataclass_fields__ surface."""
     __dataclass_fields__ = {"vocab_size": None, "dim": None}
 
     def __init__(self, *, vocab_size: int, dim: int = 32):
@@ -286,8 +286,8 @@ class _FakeKarpaConfig:
         self.dim = dim
 
 
-class _FakeKarpaBase(torch.nn.Module):
-    """Stand-in for KarpaBase that returns uniform logits."""
+class _FakeRalphBase(torch.nn.Module):
+    """Stand-in for RalphBase that returns uniform logits."""
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
@@ -326,10 +326,10 @@ class TestMainHappyPath:
 
         output_path = tmp_path / "report.json"
 
-        # Mock _import_karpa_model + _build_task_loaders + _build_tokenize_fn
+        # Mock _import_ralph_model + _build_task_loaders + _build_tokenize_fn
         with mock.patch(
-            "eval.downstream.runner_cli._import_karpa_model",
-            return_value=(_FakeKarpaBase, _FakeKarpaConfig),
+            "eval.downstream.runner_cli._import_ralph_model",
+            return_value=(_FakeRalphBase, _FakeRalphConfig),
         ), mock.patch(
             "eval.downstream.runner_cli._build_task_loaders",
             return_value=_fake_loader_factory(),
@@ -367,8 +367,8 @@ class TestMainHappyPath:
         cfg_path.write_text(json.dumps({"tasks": ["arc_easy"]}))
 
         with mock.patch(
-            "eval.downstream.runner_cli._import_karpa_model",
-            return_value=(_FakeKarpaBase, _FakeKarpaConfig),
+            "eval.downstream.runner_cli._import_ralph_model",
+            return_value=(_FakeRalphBase, _FakeRalphConfig),
         ):
             with pytest.raises(ValueError, match=r"vocab_size"):
                 main([
@@ -394,8 +394,8 @@ class TestMainHappyPath:
         assert not output.parent.exists()
 
         with mock.patch(
-            "eval.downstream.runner_cli._import_karpa_model",
-            return_value=(_FakeKarpaBase, _FakeKarpaConfig),
+            "eval.downstream.runner_cli._import_ralph_model",
+            return_value=(_FakeRalphBase, _FakeRalphConfig),
         ), mock.patch(
             "eval.downstream.runner_cli._build_task_loaders",
             return_value=_fake_loader_factory(),
