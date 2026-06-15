@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-end miner script — runs on a remote H100 to participate in Karpa.
+End-to-end miner script — runs on a remote H100 to participate in Ralph.
 
 Flow:
   1. Hash the patch file (or empty patch for baseline)
@@ -32,13 +32,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR onto sys.path
+import ralph_bootstrap  # noqa: F401  — injects RALPH_RECIPE_DIR onto sys.path
 from chain_layer.config import get_chain
 from miner.hub import upload_bundle
 from miner.submit import sign_submission
 from proof.runner import run_proof_test
 
-KARPA_ROOT = Path(__file__).resolve().parent.parent
+RALPH_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _get_hotkey_ss58(wallet_name: str, hotkey_name: str) -> str:
@@ -102,11 +102,11 @@ def run_miner(
 
     wallet_name = os.environ.get("BT_WALLET", "default")
     hotkey_name = os.environ.get("BT_HOTKEY", "default")
-    miner_gh = os.environ.get("KARPA_MINER_GH", "")
+    miner_gh = os.environ.get("RALPH_MINER_GH", "")
     miner_hotkey = _get_hotkey_ss58(wallet_name, hotkey_name)
 
     print(f"\n{'='*60}")
-    print(f"  KARPA MINER — {label}")
+    print(f"  RALPH MINER — {label}")
     print(f"{'='*60}")
     print(f"  wallet: {wallet_name}/{hotkey_name}")
     print(f"  hotkey: {miner_hotkey}")
@@ -116,7 +116,7 @@ def run_miner(
     print(f"  tier:   {tier}")
     print(f"  hf:     {hf_repo}")
 
-    chain = get_chain(KARPA_ROOT)
+    chain = get_chain(RALPH_ROOT)
     if not chain.is_hotkey_registered(miner_hotkey):
         raise RuntimeError(
             f"hotkey {miner_hotkey} is NOT registered on netuid "
@@ -124,8 +124,8 @@ def run_miner(
         )
 
     # ---- 1. Prepare submission directory -----------------------------------
-    sub_dir = KARPA_ROOT / f"runs/miner/{label}_sub"
-    proof_dir = KARPA_ROOT / f"runs/miner/{label}_proof"
+    sub_dir = RALPH_ROOT / f"runs/miner/{label}_sub"
+    proof_dir = RALPH_ROOT / f"runs/miner/{label}_proof"
     for d in [sub_dir, proof_dir]:
         if d.exists():
             shutil.rmtree(d)
@@ -194,7 +194,7 @@ def run_miner(
     print("\n[2/6] proof test — running canonical training...")
     t0 = time.time()
     bundle = run_proof_test(
-        karpa_root=KARPA_ROOT,
+        ralph_root=RALPH_ROOT,
         submission_dir=sub_dir,
         out_dir=proof_dir,
         tier=tier,
@@ -215,21 +215,21 @@ def run_miner(
     print("\n[3/6] signing submission...")
     # Sign over bundle_hash + nonce + hotkey + hypothesis-hash. Hypothesis
     # is folded in so the miner can't swap the rationale post-merge.
-    sig = sign_submission(KARPA_ROOT, miner_hotkey, bundle.bundle_hash, nonce, hypothesis=rationale_summary)
+    sig = sign_submission(RALPH_ROOT, miner_hotkey, bundle.bundle_hash, nonce, hypothesis=rationale_summary)
     print(f"      signed by {sig['public_key_hex'][:24]}...")
 
-    # ---- 5. Open PR against karpaai/recipe (before HF upload so it ends up
+    # ---- 5. Open PR against RalphLabsAI/recipe (before HF upload so it ends up
     #         in the HF PR's submission.json) -------------------------------
     pr_url = ""
-    fork_url = os.environ.get("KARPA_RECIPE_FORK", "")
-    gh_token = os.environ.get("KARPA_MINER_GH_TOKEN", "")
-    upstream = os.environ.get("KARPA_RECIPE_UPSTREAM", "karpaai/recipe")
+    fork_url = os.environ.get("RALPH_RECIPE_FORK", "")
+    gh_token = os.environ.get("RALPH_MINER_GH_TOKEN", "")
+    upstream = os.environ.get("RALPH_RECIPE_UPSTREAM", "RalphLabsAI/recipe")
     if not patch_text.strip():
         print("\n[4/6] skipping recipe PR (baseline submission, empty patch)")
     elif skip_upload:
         print("\n[4/6] skipping recipe PR (--skip-upload also implies no PR)")
     elif not fork_url or not gh_token:
-        print("\n[4/6] WARNING: KARPA_RECIPE_FORK or KARPA_MINER_GH_TOKEN missing — not opening recipe PR")
+        print("\n[4/6] WARNING: RALPH_RECIPE_FORK or RALPH_MINER_GH_TOKEN missing — not opening recipe PR")
     else:
         print(f"\n[4/6] opening recipe PR against {upstream}...")
         from miner.github_pr import open_recipe_pr
@@ -294,7 +294,7 @@ def run_miner(
     if pr_url:
         print(f"  pr:          {pr_url}")
     print("\nValidators will now find this on HF Hub and score it.")
-    print(f"Track status: tail -f {KARPA_ROOT}/chain*/events.jsonl  (on validator host)")
+    print(f"Track status: tail -f {RALPH_ROOT}/chain*/events.jsonl  (on validator host)")
 
     return {
         "miner_hotkey": miner_hotkey,
@@ -311,7 +311,7 @@ def run_miner(
 def main() -> None:
     import os
 
-    p = argparse.ArgumentParser(description="Karpa end-to-end miner")
+    p = argparse.ArgumentParser(description="Ralph end-to-end miner")
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--patch", type=Path, help="Path to patch file to submit")
     g.add_argument("--baseline", action="store_true", help="Submit empty patch (baseline)")
@@ -320,7 +320,7 @@ def main() -> None:
                    help="Recipe config (default: proxy_cpu_smoke.json — use proxy_h100.json on H100)")
     p.add_argument("--tier", default="unverified", choices=["verified", "unverified"],
                    help="Attestation tier (verified requires CC; default: unverified)")
-    p.add_argument("--hf-repo", default=os.environ.get("KARPA_HF_REPO", "karpaai/proof-bundles"),
+    p.add_argument("--hf-repo", default=os.environ.get("RALPH_HF_REPO", "RalphLabsAI/proof-bundles"),
                    help="HF dataset repo to upload to")
     p.add_argument("--hf-token", default=os.environ.get("HF_TOKEN"),
                    help="HF API token (defaults to $HF_TOKEN)")

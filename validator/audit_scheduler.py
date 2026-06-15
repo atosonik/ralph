@@ -30,12 +30,12 @@ from pathlib import Path
 
 
 def _default_random_audit_rate() -> float:
-    """Operator override via KARPA_AUDIT_RATE env var (0.0–1.0). Lets the
+    """Operator override via RALPH_AUDIT_RATE env var (0.0–1.0). Lets the
     operator drop the audit rate without code change — useful when running
     self-audits where audits cost without revealing fraud (no external miners
     to defend against)."""
     import os as _os
-    raw = _os.environ.get("KARPA_AUDIT_RATE")
+    raw = _os.environ.get("RALPH_AUDIT_RATE")
     if raw is None:
         return 0.10
     try:
@@ -196,7 +196,7 @@ def archive_audit_job(chain_dir: Path, bundle_id: str, verdict: str) -> None:
 
 def run_pending_audits(
     chain,
-    karpa_root: Path,
+    ralph_root: Path,
     chain_dir: Path,
     noise_floor_margin: float = 0.013,
     limit: int = 1,
@@ -262,7 +262,7 @@ def run_pending_audits(
 
         try:
             result = run_audit(
-                karpa_root=karpa_root,
+                ralph_root=ralph_root,
                 submission_dir=sub_dir,
                 miner_proof_dir=proof_path,
                 audit_out_dir=audit_out,

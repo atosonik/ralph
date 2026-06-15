@@ -12,7 +12,7 @@ What this module ships:
     Frozen dataclass with `to_dict` / `from_dict` so the subprocess
     wrapper can ship configs over IPC without ad-hoc serialization
     glue.
-  * `KARPA_VOCAB_SIZE = 50257` — the GPT-2 BPE vocab lock. Submissions
+  * `RALPH_VOCAB_SIZE = 50257` — the GPT-2 BPE vocab lock. Submissions
     whose checkpoint config reports a different vocab are rejected at
     runner time. Closes **B1-D6**.
   * `check_vocab_compatibility(actual_vocab_size)` — raises ValueError
@@ -36,7 +36,7 @@ What this module does NOT ship (next PR):
     **B1-D5** (the "weights_only blocks pickle RCE but not forward()
     code execution" caveat is documented as part of that wrapper).
   * The argparse CLI entrypoint.
-  * Structural-patch handling (`--patch` / `--karpa-root` args).
+  * Structural-patch handling (`--patch` / `--ralph-root` args).
     Closes **B1-D13**.
 
 Cell-key construction: `{task_name}:{scale_label}` for accuracy cells.
@@ -84,7 +84,7 @@ from .types import (
 # GPT-2 BPE vocab size. The runner accepts only models whose `vocab_size`
 # matches; mismatched-vocab submissions fail clean here instead of
 # silently producing nonsensical scores. Closes B1-D6.
-KARPA_VOCAB_SIZE = 50257
+RALPH_VOCAB_SIZE = 50257
 
 
 # ----------------------------------------------------------------------------
@@ -175,10 +175,10 @@ def check_vocab_compatibility(actual_vocab_size: int) -> None:
 
     Closes B1-D6.
     """
-    if actual_vocab_size != KARPA_VOCAB_SIZE:
+    if actual_vocab_size != RALPH_VOCAB_SIZE:
         raise ValueError(
             f"vocab_size mismatch: forward function reports "
-            f"{actual_vocab_size}, runner requires {KARPA_VOCAB_SIZE} "
+            f"{actual_vocab_size}, runner requires {RALPH_VOCAB_SIZE} "
             "(GPT-2 BPE). Submissions with divergent vocab must extend "
             "or pad to vocab=50257 or be evaluated under a different "
             "harness."

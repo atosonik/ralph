@@ -1,7 +1,7 @@
 # Hardness-subset license decision — record
 
 **Decision:** Pre-swap OpenBookQA + SciQ → **ARC-Challenge bottom-quintile + winogrande + tinyARC + tinyMMLU**.
-**Reason:** OpenBookQA and SciQ are CC-BY-NC; Karpa's gate output produces TAO emissions
+**Reason:** OpenBookQA and SciQ are CC-BY-NC; Ralph's gate output produces TAO emissions
 (commercial activity), so the NC clause is incompatible with the protocol's use. The four
 chosen alternatives are all commercial-permitting.
 **Status:** Decided 2026-06-10 ahead of any B1 engineering work.
@@ -12,7 +12,7 @@ recording it pre-build is the audit trail.
 
 ## The question
 
-The Cross-Scale Downstream Pareto rule (publicly committed in [twitter_posts/karpaai_account/11_cross_scale_downstream_pareto_pivot.md](../../twitter_posts/karpaai_account/11_cross_scale_downstream_pareto_pivot.md) and [github_discussions/karpaai_repo/02_cross_scale_downstream_pareto_pivot.md](../../github_discussions/karpaai_repo/02_cross_scale_downstream_pareto_pivot.md)) scores each accepted submission at the S₃ rung (~124M params) on:
+The Cross-Scale Downstream Pareto rule (publicly committed in [twitter_posts/RalphLabsAI_account/11_cross_scale_downstream_pareto_pivot.md](../../twitter_posts/RalphLabsAI_account/11_cross_scale_downstream_pareto_pivot.md) and [github_discussions/RalphLabsAI_repo/02_cross_scale_downstream_pareto_pivot.md](../../github_discussions/RalphLabsAI_repo/02_cross_scale_downstream_pareto_pivot.md)) scores each accepted submission at the S₃ rung (~124M params) on:
 
 1. **CORE-22** — the public 22-dataset eval bundle Karpathy uses in [nanochat #420](https://github.com/karpathy/nanochat/discussions/420).
 2. **A private hardness-graded subset** — kept off the public eval surface to defeat overfitting against a fully-public eval set.
@@ -35,7 +35,7 @@ The hardness-graded subset's original candidate list was: HellaSwag-hard / ARC-e
 
 ## The argument for pre-swapping
 
-Karpa's gate emits TAO weights, which are economic outputs of a commercial network. Embedding a CC-BY-NC dataset's bytes inside that gate is a use that the NC clause does not permit. The risk is small in absolute terms (low likelihood of enforcement), but the cost of being wrong later — having to redesign the hardness subset mid-build, recalibrate the per-cell noise floors in B5, and explain the change publicly — is high.
+Ralph's gate emits TAO weights, which are economic outputs of a commercial network. Embedding a CC-BY-NC dataset's bytes inside that gate is a use that the NC clause does not permit. The risk is small in absolute terms (low likelihood of enforcement), but the cost of being wrong later — having to redesign the hardness subset mid-build, recalibrate the per-cell noise floors in B5, and explain the change publicly — is high.
 
 The four alternative datasets satisfy three constraints simultaneously:
 

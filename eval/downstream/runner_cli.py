@@ -4,7 +4,7 @@ Invoked as `python -m eval.downstream.runner_cli ...` from the
 validator's `run_eval_in_subprocess` wrapper (eval/downstream/
 runner_subprocess.py). Reads its `EvalConfig` from a JSON file
 specified via --config, loads a miner-submitted checkpoint with
-torch.load(weights_only=True), builds a `KarpaBase` model, and
+torch.load(weights_only=True), builds a `RalphBase` model, and
 delegates to `run_downstream_eval`. Writes the resulting
 `DownstreamReport` as JSON to --output.
 
@@ -15,7 +15,7 @@ Closes:
     checkpoint load; it does NOT block arbitrary Python code
     executed inside the loaded model's `forward()` method. Once
     state_dict tensors are back in memory and `model(input_ids)` is
-    called, any code the miner has wired into KarpaBase's forward
+    called, any code the miner has wired into RalphBase's forward
     path runs in this subprocess. The only containment B1 provides
     is OS-level process isolation (separate PID, separate Python
     interpreter), which the `run_eval_in_subprocess` wrapper
@@ -23,7 +23,7 @@ Closes:
     follow-up phase before mainnet activation.
 
   * **B1-D13** — structural-patch CLI args. --patch and
-    --karpa-root are accepted at the CLI surface so the contract is
+    --ralph-root are accepted at the CLI surface so the contract is
     stable. The actual `apply_patch` integration (~150 LOC + 2 days)
     is deferred to a follow-up PR; for now, passing --patch raises
     a clean NotImplementedError pointing at the follow-up ticket.
@@ -38,8 +38,8 @@ What this module ships:
   * `_load_checkpoint(path)` — torch.load + dict-shape validation
     helper. Returns (config_dict, state_dict). Closes the B1-D5
     weights_only=True requirement.
-  * `_import_karpa_model(karpa_root)` — sys.path bootstrap +
-    `from model import KarpaBase, KarpaConfig` import helper.
+  * `_import_ralph_model(ralph_root)` — sys.path bootstrap +
+    `from model import RalphBase, RalphConfig` import helper.
 
 What this module does NOT ship (separate follow-up PR):
 
@@ -107,8 +107,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--patch", default=None, type=Path,
                    help="Structural-patch path (B1-D13). Args accepted; "
                         "full apply_patch integration deferred.")
-    p.add_argument("--karpa-root", default=None, type=Path,
-                   help="Karpa repo root for structural-patch application "
+    p.add_argument("--ralph-root", default=None, type=Path,
+                   help="Ralph repo root for structural-patch application "
                         "(B1-D13) and `from model import ...` resolution.")
     return p
 
@@ -117,7 +117,7 @@ def _load_checkpoint(path: Path) -> tuple[dict, dict]:
     """Load a checkpoint with `torch.load(weights_only=True)`.
 
     Returns:
-      `(config_dict, state_dict)`. `config_dict` is the KarpaConfig
+      `(config_dict, state_dict)`. `config_dict` is the RalphConfig
       kwargs the checkpoint was saved with; `state_dict` is the
       tensor state for `model.load_state_dict`.
 
@@ -159,26 +159,26 @@ def _load_checkpoint(path: Path) -> tuple[dict, dict]:
     return config, state_dict
 
 
-def _import_karpa_model(karpa_root: Path | None):
-    """Inject the recipe path into sys.path and import KarpaBase + Config.
+def _import_ralph_model(ralph_root: Path | None):
+    """Inject the recipe path into sys.path and import RalphBase + Config.
 
-    If `karpa_root` is provided, prepend it to sys.path so a patched
+    If `ralph_root` is provided, prepend it to sys.path so a patched
     `model/` package wins over any installed one. We then ALWAYS run
-    `karpa_bootstrap` (which resolves the sibling `../recipe` clone)
+    `ralph_bootstrap` (which resolves the sibling `../recipe` clone)
     so that the unpatched canonical recipe path is on sys.path as a
-    fallback — without this, `--karpa-root` mode crashed with
-    `ModuleNotFoundError: No module named 'model'` because the karpa
+    fallback — without this, `--ralph-root` mode crashed with
+    `ModuleNotFoundError: No module named 'model'` because the ralph
     repo itself has no `model/` package; that lives in the recipe
-    sibling per `karpa_bootstrap.py`'s resolution order.
+    sibling per `ralph_bootstrap.py`'s resolution order.
 
-    Returns: (KarpaBase, KarpaConfig) classes.
+    Returns: (RalphBase, RalphConfig) classes.
     """
-    if karpa_root is not None:
-        sys.path.insert(0, str(karpa_root.resolve()))
-    from model import KarpaBase, KarpaConfig  # type: ignore
+    if ralph_root is not None:
+        sys.path.insert(0, str(ralph_root.resolve()))
+    from model import RalphBase, RalphConfig  # type: ignore
 
-    import karpa_bootstrap  # noqa: F401  (side-effect import)
-    return KarpaBase, KarpaConfig
+    import ralph_bootstrap  # noqa: F401  (side-effect import)
+    return RalphBase, RalphConfig
 
 
 def _build_task_loaders(
@@ -222,8 +222,8 @@ def _build_tokenize_fn():
     return lambda text: enc.encode(text)
 
 
-def _apply_patch_to_workdir(patch_path: Path, karpa_root: Path) -> Path:
-    """Copy `karpa_root` to a tmp workdir + apply `patch_path` via `patch -p1`.
+def _apply_patch_to_workdir(patch_path: Path, ralph_root: Path) -> Path:
+    """Copy `ralph_root` to a tmp workdir + apply `patch_path` via `patch -p1`.
 
     Returns the path of the patched workdir. The caller adds it to
     `sys.path` so `import model` resolves to the PATCHED model package.
@@ -234,18 +234,18 @@ def _apply_patch_to_workdir(patch_path: Path, karpa_root: Path) -> Path:
 
     Closes B1-D13 in full.
     """
-    karpa_root = karpa_root.resolve()
+    ralph_root = ralph_root.resolve()
     patch_path = patch_path.resolve()
-    if not karpa_root.exists():
-        raise FileNotFoundError(f"karpa_root not found: {karpa_root}")
+    if not ralph_root.exists():
+        raise FileNotFoundError(f"ralph_root not found: {ralph_root}")
     if not patch_path.exists():
         raise FileNotFoundError(f"patch not found: {patch_path}")
-    workdir = Path(tempfile.mkdtemp(prefix="karpa_patched_"))
-    # Copy the karpa root into the workdir. We use a child dir so
+    workdir = Path(tempfile.mkdtemp(prefix="ralph_patched_"))
+    # Copy the ralph root into the workdir. We use a child dir so
     # `workdir` itself is a clean container and can be cleaned up
     # whole-tree on completion.
-    target = workdir / "karpa_root"
-    shutil.copytree(karpa_root, target, symlinks=True)
+    target = workdir / "ralph_root"
+    shutil.copytree(ralph_root, target, symlinks=True)
     if patch_path.stat().st_size == 0:
         # Empty patch == canonical baseline. Nothing to do.
         return target
@@ -270,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
       1. Parse args.
       2. Reject --patch (B1-D13 args accepted, application deferred).
       3. Read EvalConfig JSON.
-      4. Import KarpaBase / KarpaConfig (sys.path bootstrap).
+      4. Import RalphBase / RalphConfig (sys.path bootstrap).
       5. Load checkpoint with weights_only=True.
       6. Construct model + load state_dict.
       7. Verify vocab matches.
@@ -284,28 +284,28 @@ def main(argv: list[str] | None = None) -> int:
     config = EvalConfig.from_dict(json.loads(args.config.read_text()))
 
     # Structural-patch handling (closes B1-D13): if --patch is supplied, apply
-    # it to a tmp copy of --karpa-root and import the model package from the
-    # patched workdir. Without --patch, _import_karpa_model uses the karpa
+    # it to a tmp copy of --ralph-root and import the model package from the
+    # patched workdir. Without --patch, _import_ralph_model uses the ralph
     # root as-is (sys.path insert + `from model import ...`).
     if args.patch is not None:
-        if args.karpa_root is None:
+        if args.ralph_root is None:
             raise ValueError(
-                "--patch requires --karpa-root so the patched recipe tree "
+                "--patch requires --ralph-root so the patched recipe tree "
                 "has a base to patch against"
             )
-        patched_workdir = _apply_patch_to_workdir(args.patch, args.karpa_root)
+        patched_workdir = _apply_patch_to_workdir(args.patch, args.ralph_root)
         # Re-route the model import to the patched workdir.
         sys.path.insert(0, str(patched_workdir))
 
-    KarpaBase, KarpaConfig = _import_karpa_model(args.karpa_root)
+    RalphBase, RalphConfig = _import_ralph_model(args.ralph_root)
     ckpt_config, state_dict = _load_checkpoint(args.checkpoint)
 
     cfg_kwargs = {
         k: v for k, v in ckpt_config.items()
-        if k in KarpaConfig.__dataclass_fields__
+        if k in RalphConfig.__dataclass_fields__
     }
-    model_cfg = KarpaConfig(**cfg_kwargs)
-    model = KarpaBase(model_cfg)
+    model_cfg = RalphConfig(**cfg_kwargs)
+    model = RalphBase(model_cfg)
     model.load_state_dict(state_dict, strict=True)
     model.eval()
     if torch.cuda.is_available():
@@ -330,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             input_ids = input_ids.cuda()
         with torch.no_grad():
             out = model(input_ids)
-        # KarpaBase returns (logits, optional_loss) or logits; scorer's
+        # RalphBase returns (logits, optional_loss) or logits; scorer's
         # _extract_logits handles either form.
         return out
 

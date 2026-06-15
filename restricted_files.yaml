@@ -1,4 +1,4 @@
-# Karpa Phase 0 — restricted files contract
+# Ralph Phase 0 — restricted files contract
 #
 # A miner-submitted patch that touches any path matching the patterns below is
 # rejected by the validator's diff scanner before any compute is spent.

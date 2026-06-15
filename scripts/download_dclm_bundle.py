@@ -23,7 +23,7 @@ OUTPUTS:
     <task>.jsonl, ...        unzipped task files (DCLM-native schema)
 
 The downloader does NOT re-key the per-task JSONLs into the canonical
-Karpa schema — that's `cache_hf_assets.py`'s and a follow-up adapter's
+Ralph schema — that's `cache_hf_assets.py`'s and a follow-up adapter's
 concern. The bundle here is the raw upstream artifact.
 """
 from __future__ import annotations
@@ -80,7 +80,7 @@ def _write_manifest(
 ) -> None:
     """Write a small JSON manifest that the SHA-pin commit references."""
     manifest_path.write_text(json.dumps({
-        "_meta": "karpa-dclm-bundle-manifest",
+        "_meta": "ralph-dclm-bundle-manifest",
         "url": url,
         "sha256": sha256,
         "extracted_member_count": extracted_count,

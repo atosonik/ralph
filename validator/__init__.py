@@ -8,7 +8,7 @@ import sys as _sys
 from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 
 from .scoring import ScoreReport, score_bundle
 from .validator import (

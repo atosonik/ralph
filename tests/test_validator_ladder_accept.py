@@ -4,7 +4,7 @@ Covers:
   * read_submission: bundle layout + missing/bad fields + optional cache
   * accept_submission: each rejection reason path + happy path + genesis
   * Chain event emission (submission_received) on every call
-  * KARPA_VOCAB_SIZE enforcement
+  * RALPH_VOCAB_SIZE enforcement
   * Branch id format
 """
 from __future__ import annotations
@@ -17,9 +17,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from chain_layer.local import LocalChain
-from eval.downstream.runner import KARPA_VOCAB_SIZE
+from eval.downstream.runner import RALPH_VOCAB_SIZE
 from validator.ladder import (
     ACCEPT_OK,
     SUPPORTED_SCHEMA_VERSIONS,
@@ -55,7 +55,7 @@ def _make_submission_bundle(
     branch_id: str = "main",
     bundle_hash: str = "bh",
     miner_hotkey: str = "5F_miner",
-    vocab_size: int = KARPA_VOCAB_SIZE,
+    vocab_size: int = RALPH_VOCAB_SIZE,
     include_cache: bool = True,
     cache_overrides: dict | None = None,
 ) -> Path:
@@ -107,7 +107,7 @@ def test_read_submission_happy_path(tmp_path):
     assert sub.schema_version == "v0.11"
     assert sub.parent_king_attestation_hash == "a" * 64
     assert sub.branch_id == "main"
-    assert sub.vocab_size == KARPA_VOCAB_SIZE
+    assert sub.vocab_size == RALPH_VOCAB_SIZE
     assert sub.parent_csdp_cache is not None
     assert sub.parent_csdp_cache.parent_king_attestation_hash == "a" * 64
 
@@ -155,7 +155,7 @@ def test_accept_rejects_unsupported_schema_version(chain):
         branch_id="main",
         bundle_hash="bh",
         miner_hotkey="5F",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
     result = accept_submission(sub, chain, now_iso="2026-06-12T00:00:00Z")
     assert not result.accepted
@@ -169,7 +169,7 @@ def test_accept_rejects_bad_branch_id(chain):
         branch_id="random_string",
         bundle_hash="bh",
         miner_hotkey="5F",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
     result = accept_submission(sub, chain, now_iso="2026-06-12T00:00:00Z")
     assert not result.accepted
@@ -197,7 +197,7 @@ def test_accept_rejects_bad_parent_hash_format(chain):
         branch_id="main",
         bundle_hash="bh",
         miner_hotkey="5F",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
         parent_csdp_cache=ParentCsdpCache.from_dict(_make_cache_dict()),
     )
     result = accept_submission(sub, chain, now_iso="2026-06-12T00:00:00Z")
@@ -212,7 +212,7 @@ def test_accept_rejects_parent_not_on_chain(chain):
         branch_id="main",
         bundle_hash="bh",
         miner_hotkey="5F",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
         parent_csdp_cache=ParentCsdpCache.from_dict(_make_cache_dict(parent_hash="b" * 64)),
     )
     result = accept_submission(sub, chain, now_iso="2026-06-12T00:00:00Z")
@@ -232,7 +232,7 @@ def test_accept_genesis_happy_path(chain):
         branch_id="main",
         bundle_hash="bh_genesis",
         miner_hotkey="5F_genesis",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
     result = accept_submission(sub, chain, now_iso="2026-06-12T00:00:00Z")
     assert result.accepted
@@ -246,7 +246,7 @@ def test_accept_with_parent_happy_path(chain_with_king):
         branch_id="main",
         bundle_hash="bh_child",
         miner_hotkey="5F_child",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
         parent_csdp_cache=ParentCsdpCache.from_dict(_make_cache_dict()),
     )
     result = accept_submission(sub, chain_with_king, now_iso="2026-06-12T00:00:00Z")
@@ -261,7 +261,7 @@ def test_accept_branch_open_format(chain_with_king):
         branch_id="open_new_branch_my_idea",
         bundle_hash="bh",
         miner_hotkey="5F",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
         parent_csdp_cache=ParentCsdpCache.from_dict(_make_cache_dict()),
     )
     result = accept_submission(sub, chain_with_king, now_iso="2026-06-12T00:00:00Z")
@@ -275,7 +275,7 @@ def test_accept_existing_branch_format(chain_with_king):
         branch_id="branch-3",
         bundle_hash="bh",
         miner_hotkey="5F",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
         parent_csdp_cache=ParentCsdpCache.from_dict(_make_cache_dict()),
     )
     result = accept_submission(sub, chain_with_king, now_iso="2026-06-12T00:00:00Z")
@@ -294,7 +294,7 @@ def test_accept_emits_submission_received_event(chain):
         branch_id="main",
         bundle_hash="bh",
         miner_hotkey="5F",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
     accept_submission(sub, chain, now_iso="2026-06-12T00:00:00Z")
     events = chain.get_events(limit=10)
@@ -328,7 +328,7 @@ def test_accept_event_emission_can_be_disabled(chain):
         branch_id="main",
         bundle_hash="bh",
         miner_hotkey="5F",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
     accept_submission(sub, chain, now_iso="2026-06-12T00:00:00Z", emit_chain_event=False)
     assert chain.get_events(limit=10) == []

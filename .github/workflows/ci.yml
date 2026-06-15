@@ -18,13 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The Karpa codebase imports from a sibling karpaai/recipe checkout
-      # via karpa_bootstrap.py. Clone it into the parent directory so
-      # KARPA_RECIPE_DIR autodetection finds it.
-      - name: Checkout karpaai/recipe
+      # The Ralph codebase imports from a sibling RalphLabsAI/recipe checkout
+      # via ralph_bootstrap.py. Clone it into the parent directory so
+      # RALPH_RECIPE_DIR autodetection finds it.
+      - name: Checkout RalphLabsAI/recipe
         uses: actions/checkout@v4
         with:
-          repository: karpaai/recipe
+          repository: RalphLabsAI/recipe
           path: recipe_repo
 
       - name: Set up Python ${{ matrix.python-version }}
@@ -45,7 +45,7 @@ jobs:
 
       - name: Run tests
         env:
-          KARPA_RECIPE_DIR: ${{ github.workspace }}/recipe_repo
+          RALPH_RECIPE_DIR: ${{ github.workspace }}/recipe_repo
         run: |
           pytest tests/ -v --tb=short
 

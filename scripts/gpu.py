@@ -65,7 +65,7 @@ BACKUP_DIR = Path(__file__).resolve().parent.parent.parent / "backup_h100"
 
 
 def _instance_file(name: str = "default") -> Path:
-    """One state file per logical instance (e.g. karpa1, karpa2)."""
+    """One state file per logical instance (e.g. ralph1, ralph2)."""
     return Path(f"/root/.shadeform_instance_{name}.json")
 
 
@@ -170,7 +170,7 @@ def cmd_rent(args):
         "region": region,
         "shade_instance_type": shade_type,
         "shade_cloud": True,
-        "name": f"karpa-{name}-{int(time.time()) % 100000}",
+        "name": f"ralph-{name}-{int(time.time()) % 100000}",
     }
     if SSH_KEY_ID:
         body["ssh_key_id"] = SSH_KEY_ID
@@ -285,7 +285,7 @@ def cmd_backup(args):
     result = subprocess.run(
         [
             "ssh", "-i", str(SSH_KEY), "-p", str(port), f"{user}@{ip}",
-            "find /workspace/karpa/runs "
+            "find /workspace/ralph/runs "
             "-name 'final_state.json' -o -name 'training_log.jsonl' "
             "-o -name 'checkpoint.pt' -o -name 'data_manifest.json' "
             "2>/dev/null | head -20",
@@ -295,7 +295,7 @@ def cmd_backup(args):
     remote_files = [f.strip() for f in result.stdout.splitlines() if f.strip()]
     print(f"Found {len(remote_files)} files to backup")
     for rf in remote_files:
-        local_name = rf.replace("/workspace/karpa/", "").replace("/", "_")
+        local_name = rf.replace("/workspace/ralph/", "").replace("/", "_")
         local_path = BACKUP_DIR / local_name
         print(f"  {rf} → {local_path.name}")
         subprocess.run(scp_base + [f"{user}@{ip}:{rf}", str(local_path)], timeout=300)

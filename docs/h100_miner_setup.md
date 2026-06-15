@@ -1,6 +1,6 @@
 # H100 miner setup
 
-How to launch a Karpa miner on a rented H100 (Shadeform / Hyperstack / any cloud) and submit proof bundles to validators via HuggingFace Hub.
+How to launch a Ralph miner on a rented H100 (Shadeform / Hyperstack / any cloud) and submit proof bundles to validators via HuggingFace Hub.
 
 ## What you need on the box
 
@@ -24,10 +24,10 @@ python scripts/gpu.py ssh            # SSH in
 Inside the rented box, clone **both** repos side-by-side:
 
 ```bash
-git clone https://github.com/karpaai/karpa.git
-git clone https://github.com/karpaai/recipe.git
+git clone https://github.com/RalphLabsAI/ralph.git
+git clone https://github.com/RalphLabsAI/recipe.git
 
-cd karpa
+cd ralph
 python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[hub]'    # includes huggingface_hub + bittensor
@@ -40,7 +40,7 @@ pip install -e '.[hub]'    # includes huggingface_hub + bittensor
   --eval-tokens 5_000_000)
 ```
 
-The protocol auto-resolves the recipe via `../recipe` — no flag needed. To put it elsewhere, set `KARPA_RECIPE_DIR=/path/to/recipe` in `.env`.
+The protocol auto-resolves the recipe via `../recipe` — no flag needed. To put it elsewhere, set `RALPH_RECIPE_DIR=/path/to/recipe` in `.env`.
 
 ## 3. Bittensor wallet + HF token
 
@@ -55,7 +55,7 @@ Copy your already-registered miner hotkey to the box (the simplest path is `rsyn
 
 ```bash
 cat > .env <<'EOF'
-KARPA_CHAIN=bittensor
+RALPH_CHAIN=bittensor
 BT_NETWORK=test
 BT_NETUID=16
 BT_WALLET=<your-miner-wallet>
@@ -63,7 +63,7 @@ BT_HOTKEY=default
 BT_WALLET_PASSWORD=<password>
 
 HF_TOKEN=<hf-write-token>
-KARPA_HF_REPO=karpaai/proof-bundles
+RALPH_HF_REPO=RalphLabsAI/proof-bundles
 EOF
 ```
 
@@ -110,7 +110,7 @@ What happens under the hood (printed in the run log):
 2. Commit `(hotkey, patch_hash, nonce)` on Bittensor
 3. Run canonical training (proxy_h100.json: ~30 min on a single H100)
 4. Sign the bundle with the miner hotkey
-5. Upload bundle to `karpaai/proof-bundles/submissions/<bundle_hash[:16]>/`
+5. Upload bundle to `RalphLabsAI/proof-bundles/submissions/<bundle_hash[:16]>/`
 
 After upload, validators worldwide will discover the bundle on their next HF poll (~60s) and score it. Track progress from any validator host with:
 

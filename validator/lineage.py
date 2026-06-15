@@ -1,6 +1,6 @@
 """v0.11-lite lineage primitives — attestation hashing + parent-cache verification.
 
-The Karpa v0.11 protocol replaces the v0.10 nested `KingRecord.previous_king`
+The Ralph v0.11 protocol replaces the v0.10 nested `KingRecord.previous_king`
 dict with a flat cryptographic pointer `parent_king_attestation_hash`. Each
 king carries its OWN `king_attestation_hash` (sha256 of canonical attestation
 payload) and points back to its parent's hash via

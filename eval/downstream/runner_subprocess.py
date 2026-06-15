@@ -20,7 +20,7 @@ What this module ships:
     write the args right".
   * `run_eval_in_subprocess(checkpoint_path, config, *, bundle_sha256,
     bundle_dir, vocab_size, hardness_index_path=None, patch_path=None,
-    karpa_root=None, output_dir=None, timeout_s=600.0,
+    ralph_root=None, output_dir=None, timeout_s=600.0,
     command_prefix=None) -> DownstreamReport` — the wrapper.
 
 The wrapper:
@@ -91,11 +91,11 @@ DEFAULT_COMMAND_PREFIX: tuple[str, ...] = (
     "eval.downstream.runner_cli",
 )
 
-# Karpa repo root, resolved at import time. We prepend this to the
+# Ralph repo root, resolved at import time. We prepend this to the
 # subprocess's PYTHONPATH so `eval.downstream.runner_cli` (the production
 # CLI) and `eval.downstream.types` (its imports) resolve regardless of
 # the caller's cwd or how the package was installed.
-KARPA_ROOT = Path(__file__).resolve().parents[2]
+RALPH_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ----------------------------------------------------------------------------
@@ -219,7 +219,7 @@ def run_eval_in_subprocess(
     vocab_size: int,
     hardness_index_path: Path | None = None,
     patch_path: Path | None = None,
-    karpa_root: Path | None = None,
+    ralph_root: Path | None = None,
     output_dir: Path | None = None,
     timeout_s: float = 600.0,
     command_prefix: Sequence[str] | None = None,
@@ -244,7 +244,7 @@ def run_eval_in_subprocess(
       hardness_index_path: optional JSONL hardness-index path.
         Required when `config.tasks` includes a private_hard task.
       patch_path: optional structural-patch file path (per B1-D13).
-      karpa_root: optional karpa repo root for structural-patch
+      ralph_root: optional ralph repo root for structural-patch
         application (per B1-D13).
       output_dir: caller-controlled directory for the run's working
         files (config, output, hardness-index copy). If None, a
@@ -297,16 +297,16 @@ def run_eval_in_subprocess(
             argv += ["--hardness-index", str(hardness_index_path)]
         if patch_path is not None:
             argv += ["--patch", str(patch_path)]
-        if karpa_root is not None:
-            argv += ["--karpa-root", str(karpa_root)]
+        if ralph_root is not None:
+            argv += ["--ralph-root", str(ralph_root)]
 
         sub_env = (env if env is not None else os.environ).copy()
         existing_pp = sub_env.get("PYTHONPATH", "")
-        karpa_root_str = str(KARPA_ROOT)
+        ralph_root_str = str(RALPH_ROOT)
         sub_env["PYTHONPATH"] = (
-            f"{karpa_root_str}{os.pathsep}{existing_pp}"
+            f"{ralph_root_str}{os.pathsep}{existing_pp}"
             if existing_pp
-            else karpa_root_str
+            else ralph_root_str
         )
 
         try:

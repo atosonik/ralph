@@ -18,7 +18,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_REPO = "karpaai/proof-bundles"
+DEFAULT_REPO = "RalphLabsAI/proof-bundles"
 
 
 def _state_path(queue_dir: Path) -> Path:
@@ -84,7 +84,7 @@ def download_one(
 
     git_ref is the revision to read from — `main` for legacy direct-commit
     flows, `refs/pr/N` for PR-based submissions (the default since miners
-    aren't org members on karpaai).
+    aren't org members on RalphLabsAI).
     """
     from huggingface_hub import hf_hub_download, list_repo_files
 
@@ -141,7 +141,7 @@ def download_one(
     # Annotate which PR this came from so the validator can merge later.
     if pr_num is not None:
         (out / ".hf_pr.json").write_text(json.dumps(
-            {"pr_num": pr_num, "git_ref": git_ref, "repo_id": "karpaai/proof-bundles"},
+            {"pr_num": pr_num, "git_ref": git_ref, "repo_id": "RalphLabsAI/proof-bundles"},
             indent=2,
         ))
     return True

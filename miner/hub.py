@@ -5,7 +5,7 @@ Miners upload proof bundles to HuggingFace after running the proof test.
 Validators download bundles from HF URLs referenced in submission PRs.
 
 The bundle structure on HF:
-    karpaai/proof-bundles (dataset repo)
+    RalphLabsAI/proof-bundles (dataset repo)
       submissions/<bundle_hash_prefix>/
         bundle_manifest.json
         checkpoint.pt
@@ -16,12 +16,12 @@ The bundle structure on HF:
 
 Usage:
     # Miner uploads after proof test
-    python -m miner.hub upload --proof-dir runs/proof_xxx --repo karpaai/proof-bundles
+    python -m miner.hub upload --proof-dir runs/proof_xxx --repo RalphLabsAI/proof-bundles
 
     # Validator downloads for scoring
-    python -m miner.hub download --bundle-hash abc123 --repo karpaai/proof-bundles --out-dir /tmp/bundle
+    python -m miner.hub download --bundle-hash abc123 --repo RalphLabsAI/proof-bundles --out-dir /tmp/bundle
 
-Requires: pip install 'karpa-subnet[hub]'
+Requires: pip install 'ralph-subnet[hub]'
 """
 
 from __future__ import annotations
@@ -33,14 +33,14 @@ from pathlib import Path
 
 def upload_bundle(
     proof_dir: Path,
-    repo_id: str = "karpaai/proof-bundles",
+    repo_id: str = "RalphLabsAI/proof-bundles",
     token: str | None = None,
     rationale_text: str = "",
     patch_path: Path | None = None,
 ) -> str:
     """Upload a proof bundle as a single HF PR. Returns the PR URL.
 
-    Miners aren't org members on karpaai, so direct commits to main are
+    Miners aren't org members on RalphLabsAI, so direct commits to main are
     forbidden. Instead we stage all the bundle files into one folder and
     push them via `create_pr=True` — community PR pattern. The validator
     side polls open PRs, scores, and the bot merges the winner.
@@ -145,7 +145,7 @@ def upload_bundle(
 
 def download_bundle(
     bundle_hash: str,
-    repo_id: str = "karpaai/proof-bundles",
+    repo_id: str = "RalphLabsAI/proof-bundles",
     out_dir: Path | None = None,
     token: str | None = None,
 ) -> Path:
@@ -154,7 +154,7 @@ def download_bundle(
 
     prefix = f"submissions/{bundle_hash}"
     if out_dir is None:
-        out_dir = Path(f"/tmp/karpa_bundles/{bundle_hash[:16]}")
+        out_dir = Path(f"/tmp/ralph_bundles/{bundle_hash[:16]}")
     out_dir.mkdir(parents=True, exist_ok=True)
     training_dir = out_dir / "training"
     training_dir.mkdir(exist_ok=True)
@@ -202,12 +202,12 @@ def main() -> None:
 
     up = sub.add_parser("upload")
     up.add_argument("--proof-dir", type=Path, required=True)
-    up.add_argument("--repo", default="karpaai/proof-bundles")
+    up.add_argument("--repo", default="RalphLabsAI/proof-bundles")
     up.add_argument("--token", default=None)
 
     down = sub.add_parser("download")
     down.add_argument("--bundle-hash", required=True)
-    down.add_argument("--repo", default="karpaai/proof-bundles")
+    down.add_argument("--repo", default="RalphLabsAI/proof-bundles")
     down.add_argument("--out-dir", type=Path, default=None)
     down.add_argument("--token", default=None)
 

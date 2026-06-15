@@ -16,7 +16,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.downstream.core22 import (
     MCRawRow,
     SchemaRawRow,
@@ -322,7 +322,7 @@ def test_read_rejects_format_mismatch(tmp_path):
     should not be silently consumed by the JSONL reader."""
     path = tmp_path / "wrong.jsonl"
     path.write_text(
-        '{"_meta": "karpa-hardness-index", "format": "parquet-v1", "version": "v"}\n'
+        '{"_meta": "ralph-hardness-index", "format": "parquet-v1", "version": "v"}\n'
     )
     with pytest.raises(ValueError, match=r"format mismatch"):
         read_hardness_index_jsonl(path)

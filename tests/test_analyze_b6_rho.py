@@ -15,19 +15,19 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from scripts.analyze_b6_rho import (
     BOOTSTRAP_CI,
     BOOTSTRAP_N_RESAMPLES,
     BOOTSTRAP_SEED,
-    KARPA_AXIS_FOR_RHO,
     PASS_LOWER_CI_THRESHOLD,
     PASS_OLMO_POINT_THRESHOLD,
     PASS_OLMO_REFERENCE_NAME,
     PINNED_REFERENCES,
+    RALPH_AXIS_FOR_RHO,
     _average_rank,
-    _karpa_s3_overall_from_report,
     _pearson,
+    _ralph_s3_overall_from_report,
     analyze_b6,
     bootstrap_spearman_ci,
     spearman_rho,
@@ -58,8 +58,8 @@ def test_bootstrap_constants_locked():
     assert BOOTSTRAP_SEED == 0
 
 
-def test_karpa_axis_locked():
-    assert KARPA_AXIS_FOR_RHO == "s3_overall"
+def test_ralph_axis_locked():
+    assert RALPH_AXIS_FOR_RHO == "s3_overall"
 
 
 # ============================================================================
@@ -144,11 +144,11 @@ class TestBootstrapCi:
 
 
 # ============================================================================
-# Karpa S3 extraction
+# Ralph S3 extraction
 # ============================================================================
 
 
-class TestKarpaS3Extract:
+class TestRalphS3Extract:
     def test_picks_only_s3_cells(self):
         report = {
             "cells": {
@@ -160,14 +160,14 @@ class TestKarpaS3Extract:
             }
         }
         # Mean of three S3 cells: (0.7 + 0.6 + 0.8) / 3 = 0.7
-        assert _karpa_s3_overall_from_report(report) == pytest.approx(0.7)
+        assert _ralph_s3_overall_from_report(report) == pytest.approx(0.7)
 
     def test_no_s3_cells_returns_none(self):
         report = {"cells": {"arc_easy:S1": {"accuracy": 0.3}}}
-        assert _karpa_s3_overall_from_report(report) is None
+        assert _ralph_s3_overall_from_report(report) is None
 
     def test_empty_cells_returns_none(self):
-        assert _karpa_s3_overall_from_report({"cells": {}}) is None
+        assert _ralph_s3_overall_from_report({"cells": {}}) is None
 
 
 # ============================================================================
@@ -196,12 +196,12 @@ def _write_recipe_report(path: Path, *, s3_value: float):
     }))
 
 
-def _make_b6_inputs(tmp_path: Path, *, karpa_scores: list[float],
+def _make_b6_inputs(tmp_path: Path, *, ralph_scores: list[float],
                     ref_scores: list[dict] | None = None,
                     statuses: list[str] | None = None):
     """Build run_result, refs, and per-recipe reports inside tmp_path."""
     if statuses is None:
-        statuses = ["success"] * len(karpa_scores)
+        statuses = ["success"] * len(ralph_scores)
     if ref_scores is None:
         ref_scores = [
             {
@@ -209,13 +209,13 @@ def _make_b6_inputs(tmp_path: Path, *, karpa_scores: list[float],
                 "pythia_1_4b": 0.5 + i * 0.04,
                 "tinyllama_1_1b_3t": 0.5 + i * 0.03,
             }
-            for i in range(len(karpa_scores))
+            for i in range(len(ralph_scores))
         ]
     per_recipe_dir = tmp_path / "per_recipe"
     per_recipe_dir.mkdir(parents=True, exist_ok=True)
     recipes = []
     refs = {}
-    for i, (score, status) in enumerate(zip(karpa_scores, statuses)):
+    for i, (score, status) in enumerate(zip(ralph_scores, statuses)):
         recipe_id = f"r{i}"
         report_path = per_recipe_dir / f"{recipe_id}.json"
         if status == "success":
@@ -240,9 +240,9 @@ def _make_b6_inputs(tmp_path: Path, *, karpa_scores: list[float],
 
 class TestAnalyzeB6:
     def test_perfect_correlation_passes(self, tmp_path):
-        # 6 recipes with perfectly correlated Karpa S3 and reference scores.
-        karpa = [0.30, 0.40, 0.50, 0.60, 0.70, 0.80]
-        run_result, refs, prd = _make_b6_inputs(tmp_path, karpa_scores=karpa)
+        # 6 recipes with perfectly correlated Ralph S3 and reference scores.
+        ralph = [0.30, 0.40, 0.50, 0.60, 0.70, 0.80]
+        run_result, refs, prd = _make_b6_inputs(tmp_path, ralph_scores=ralph)
         result = analyze_b6(run_result, refs, prd)
         assert result.decision == "PASS"
         olmo = next(r for r in result.per_reference if r.reference_name == "olmo_2_1b_step_30b")
@@ -250,9 +250,9 @@ class TestAnalyzeB6:
         assert olmo.ci_lower > 0.5
 
     def test_zero_correlation_fails(self, tmp_path):
-        # Karpa S3 perfectly correlated with itself; reference set
-        # uncorrelated with Karpa (random-ish).
-        karpa = [0.30, 0.40, 0.50, 0.60, 0.70, 0.80]
+        # Ralph S3 perfectly correlated with itself; reference set
+        # uncorrelated with Ralph (random-ish).
+        ralph = [0.30, 0.40, 0.50, 0.60, 0.70, 0.80]
         ref_scores = []
         bad = [0.7, 0.3, 0.6, 0.4, 0.5, 0.2]
         for i in range(6):
@@ -262,23 +262,23 @@ class TestAnalyzeB6:
                 "tinyllama_1_1b_3t": bad[(i + 4) % 6],
             })
         run_result, refs, prd = _make_b6_inputs(
-            tmp_path, karpa_scores=karpa, ref_scores=ref_scores,
+            tmp_path, ralph_scores=ralph, ref_scores=ref_scores,
         )
         result = analyze_b6(run_result, refs, prd)
         assert result.decision == "FAIL"
 
     def test_aborted_recipes_dropped(self, tmp_path):
-        karpa = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+        ralph = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
         statuses = ["success", "success", "aborted", "success", "success", "success"]
         run_result, refs, prd = _make_b6_inputs(
-            tmp_path, karpa_scores=karpa, statuses=statuses,
+            tmp_path, ralph_scores=ralph, statuses=statuses,
         )
         result = analyze_b6(run_result, refs, prd)
         olmo = next(r for r in result.per_reference if r.reference_name == "olmo_2_1b_step_30b")
         assert olmo.n_pairs_used == 5  # the aborted one dropped
 
     def test_nan_reference_scores_dropped(self, tmp_path):
-        karpa = [0.3, 0.4, 0.5, 0.6, 0.7]
+        ralph = [0.3, 0.4, 0.5, 0.6, 0.7]
         # Recipe 2 has NaN OLMo score → dropped from OLMo pair set.
         refs_in = [
             {"olmo_2_1b_step_30b": 0.5, "pythia_1_4b": 0.5, "tinyllama_1_1b_3t": 0.5},
@@ -288,15 +288,15 @@ class TestAnalyzeB6:
             {"olmo_2_1b_step_30b": 0.8, "pythia_1_4b": 0.7, "tinyllama_1_1b_3t": 0.3},
         ]
         run_result, refs, prd = _make_b6_inputs(
-            tmp_path, karpa_scores=karpa, ref_scores=refs_in,
+            tmp_path, ralph_scores=ralph, ref_scores=refs_in,
         )
         result = analyze_b6(run_result, refs, prd)
         olmo = next(r for r in result.per_reference if r.reference_name == "olmo_2_1b_step_30b")
         assert olmo.n_pairs_used == 4
 
     def test_decision_includes_all_pinned_references(self, tmp_path):
-        karpa = [0.3, 0.4, 0.5, 0.6, 0.7]
-        run_result, refs, prd = _make_b6_inputs(tmp_path, karpa_scores=karpa)
+        ralph = [0.3, 0.4, 0.5, 0.6, 0.7]
+        run_result, refs, prd = _make_b6_inputs(tmp_path, ralph_scores=ralph)
         result = analyze_b6(run_result, refs, prd)
         names = [r.reference_name for r in result.per_reference]
         assert names == list(PINNED_REFERENCES)
@@ -305,14 +305,14 @@ class TestAnalyzeB6:
         with pytest.raises(ValueError, match=r"recipes is empty"):
             analyze_b6({"recipes": []}, {}, tmp_path)
 
-    def test_no_karpa_scores_rejected(self, tmp_path):
-        # All recipes aborted → no Karpa scores → can't compute rho.
-        karpa = [0.3, 0.4, 0.5]
+    def test_no_ralph_scores_rejected(self, tmp_path):
+        # All recipes aborted → no Ralph scores → can't compute rho.
+        ralph = [0.3, 0.4, 0.5]
         statuses = ["aborted", "aborted", "aborted"]
         run_result, refs, prd = _make_b6_inputs(
-            tmp_path, karpa_scores=karpa, statuses=statuses,
+            tmp_path, ralph_scores=ralph, statuses=statuses,
         )
-        with pytest.raises(ValueError, match=r"no Karpa S3 scores"):
+        with pytest.raises(ValueError, match=r"no Ralph S3 scores"):
             analyze_b6(run_result, refs, prd)
 
 
@@ -323,8 +323,8 @@ class TestAnalyzeB6:
 
 def test_cli_main_pass_returns_zero(tmp_path):
     from scripts.analyze_b6_rho import main
-    karpa = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-    run_result, refs, _ = _make_b6_inputs(tmp_path, karpa_scores=karpa)
+    ralph = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    run_result, refs, _ = _make_b6_inputs(tmp_path, ralph_scores=ralph)
     rr_path = tmp_path / "result.json"
     rr_path.write_text(json.dumps(run_result))
     refs_path = tmp_path / "refs.json"
@@ -343,7 +343,7 @@ def test_cli_main_pass_returns_zero(tmp_path):
 
 def test_cli_main_fail_returns_one(tmp_path):
     from scripts.analyze_b6_rho import main
-    karpa = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    ralph = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
     bad = [0.7, 0.3, 0.6, 0.4, 0.5, 0.2]
     ref_scores = [
         {"olmo_2_1b_step_30b": bad[i], "pythia_1_4b": bad[(i + 2) % 6],
@@ -351,7 +351,7 @@ def test_cli_main_fail_returns_one(tmp_path):
         for i in range(6)
     ]
     run_result, refs, _ = _make_b6_inputs(
-        tmp_path, karpa_scores=karpa, ref_scores=ref_scores,
+        tmp_path, ralph_scores=ralph, ref_scores=ref_scores,
     )
     rr_path = tmp_path / "result.json"
     rr_path.write_text(json.dumps(run_result))

@@ -22,7 +22,7 @@ PROTOCOL CONSTANTS (pinned at b6-preregistered-v1 tag; no post-hoc edits):
 
 USAGE:
     python scripts/b6_run.py \\
-        --karpa-root /path/to/karpa_root \\
+        --ralph-root /path/to/ralph_root \\
         --bundle-dir eval/private/downstream_pool/bundle_v1 \\
         --bundle-sha-sha256 <sha> \\
         --recipes-config configs/b6_recipes.json \\
@@ -65,8 +65,8 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401, E402
-from eval.downstream.runner import KARPA_VOCAB_SIZE  # noqa: E402
+import ralph_bootstrap  # noqa: F401, E402
+from eval.downstream.runner import RALPH_VOCAB_SIZE  # noqa: E402
 from eval.downstream.runner_subprocess import EvalSubprocessError  # noqa: E402
 from eval.downstream.types import DownstreamReport  # noqa: E402
 from validator.ladder import (  # noqa: E402
@@ -211,14 +211,14 @@ def _genesis_submission(recipe_id: str) -> Submission:
         branch_id="main",
         bundle_hash=f"b6_recipe_{recipe_id}",
         miner_hotkey="5F_b6_runner",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
 
 
 def run_one_recipe(
     spec: RecipeSpec,
     *,
-    karpa_root: Path,
+    ralph_root: Path,
     bundle_dir: Path,
     bundle_sha256: str,
     output_dir: Path,
@@ -250,7 +250,7 @@ def run_one_recipe(
                 _genesis_submission(spec.id),
                 config,
                 checkpoint_path=spec.checkpoint,
-                karpa_root=karpa_root,
+                ralph_root=ralph_root,
                 patch_path=spec.patch,
                 mode=EVAL_MODE_V011,
                 command_prefix=command_prefix,
@@ -320,7 +320,7 @@ def _report_to_dict(report: DownstreamReport) -> dict:
 def run_b6(
     recipes: list[RecipeSpec],
     *,
-    karpa_root: Path,
+    ralph_root: Path,
     bundle_dir: Path,
     bundle_sha256: str,
     output_dir: Path,
@@ -358,7 +358,7 @@ def run_b6(
             continue
         recipe_result = run_one_recipe(
             spec,
-            karpa_root=karpa_root,
+            ralph_root=ralph_root,
             bundle_dir=bundle_dir,
             bundle_sha256=bundle_sha256,
             output_dir=output_dir,
@@ -399,7 +399,7 @@ def run_b6(
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="scripts.b6_run")
-    p.add_argument("--karpa-root", required=True, type=Path)
+    p.add_argument("--ralph-root", required=True, type=Path)
     p.add_argument("--bundle-dir", required=True, type=Path)
     p.add_argument("--bundle-sha-sha256", required=True, dest="bundle_sha256")
     p.add_argument("--recipes-config", required=True, type=Path)
@@ -416,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     recipes = load_recipes_config(args.recipes_config)
     summary = run_b6(
         recipes,
-        karpa_root=args.karpa_root,
+        ralph_root=args.ralph_root,
         bundle_dir=args.bundle_dir,
         bundle_sha256=args.bundle_sha256,
         output_dir=args.output,

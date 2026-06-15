@@ -1,4 +1,4 @@
-# Karpa proof-test container
+# Ralph proof-test container
 #
 # This is the official miner container that runs the canonical training
 # procedure for a submitted patch and produces the attested proof bundle.
@@ -9,23 +9,23 @@
 # doesn't match.
 #
 # Build:
-#   docker build -t karpa-proof:latest .
+#   docker build -t ralph-proof:latest .
 #
 # Run a proof test:
 #   docker run --gpus all --rm \
 #     -v /path/to/data:/data:ro \
 #     -v /path/to/submission:/submission:ro \
 #     -v /path/to/output:/output \
-#     karpa-proof:latest \
+#     ralph-proof:latest \
 #       --submission /submission --out-dir /output
 #
 # For reproducible builds:
 #   DOCKER_BUILDKIT=1 docker build \
 #     --build-arg BUILDKIT_INLINE_CACHE=1 \
-#     -t karpa-proof:$(git rev-parse --short HEAD) .
+#     -t ralph-proof:$(git rev-parse --short HEAD) .
 #
 # The image digest (sha256) is the container measurement:
-#   docker inspect --format='{{.RepoDigests}}' karpa-proof:latest
+#   docker inspect --format='{{.RepoDigests}}' ralph-proof:latest
 
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS base
 
@@ -66,7 +66,7 @@ COPY restricted_files.yaml /app/restricted_files.yaml
 WORKDIR /app
 
 # Verify the model code loads.
-RUN python -c "from model import KarpaBase, KarpaConfig; print('model import ok')"
+RUN python -c "from model import RalphBase, RalphConfig; print('model import ok')"
 RUN python -c "from proof.runner import run_proof_test; print('proof runner import ok')"
 
 # The entry point is the proof runner.
@@ -79,6 +79,6 @@ CMD ["--help"]
 
 # --- Labels for traceability ---
 ARG GIT_SHA="unknown"
-LABEL org.opencontainers.image.source="https://github.com/karpaai/karpa"
+LABEL org.opencontainers.image.source="https://github.com/RalphLabsAI/ralph"
 LABEL org.opencontainers.image.revision="${GIT_SHA}"
-LABEL org.opencontainers.image.description="Karpa proof-test container — canonical training + attestation"
+LABEL org.opencontainers.image.description="Ralph proof-test container — canonical training + attestation"

@@ -28,14 +28,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import bittensor as bt
 
-import karpa_bootstrap  # noqa: F401  — injects KARPA_RECIPE_DIR
+import ralph_bootstrap  # noqa: F401  — injects RALPH_RECIPE_DIR
 from chain_layer.config import get_chain
 from miner.submit import sign_submission
 from proof.runner import run_proof_test
 from validator.scoring import score_bundle
 from validator.validator import judge_submission
 
-KARPA_ROOT = Path(__file__).resolve().parent.parent
+RALPH_ROOT = Path(__file__).resolve().parent.parent
 
 PATCH_RAISE_LR = """\
 --- a/configs/proxy_cpu_smoke.json
@@ -72,8 +72,8 @@ def submit_and_score(
     print(f"{'='*60}")
 
     # 1. Prepare submission dir
-    sub_dir = KARPA_ROOT / f"runs/testnet/{label}_sub"
-    proof_dir = KARPA_ROOT / f"runs/testnet/{label}_proof"
+    sub_dir = RALPH_ROOT / f"runs/testnet/{label}_sub"
+    proof_dir = RALPH_ROOT / f"runs/testnet/{label}_proof"
     for d in [sub_dir, proof_dir]:
         if d.exists():
             shutil.rmtree(d)
@@ -98,7 +98,7 @@ def submit_and_score(
     # 3. Proof test (CPU smoke — ~3 seconds)
     print("  [proof] running canonical training...")
     bundle = run_proof_test(
-        karpa_root=KARPA_ROOT,
+        ralph_root=RALPH_ROOT,
         submission_dir=sub_dir,
         out_dir=proof_dir,
         tier=tier,
@@ -106,7 +106,7 @@ def submit_and_score(
     print(f"  [proof] bundle_hash={bundle.bundle_hash[:16]}...")
 
     # 4. Sign the submission
-    sig = sign_submission(KARPA_ROOT, miner_hotkey, bundle.bundle_hash, nonce)
+    sig = sign_submission(RALPH_ROOT, miner_hotkey, bundle.bundle_hash, nonce)
     submission = {
         "miner_hotkey": miner_hotkey,
         "handshake_nonce": nonce,
@@ -121,7 +121,7 @@ def submit_and_score(
 
     # 5. Validator judges
     print("  [validator] running 4 ops + hidden eval...")
-    result = judge_submission(KARPA_ROOT, proof_dir)
+    result = judge_submission(RALPH_ROOT, proof_dir)
     if result.rejected:
         print(f"  [REJECTED] {result.rejected.reason}: {result.rejected.detail}")
         chain.append_event({
@@ -207,14 +207,14 @@ def submit_and_score(
 
 def main():
     print("=" * 60)
-    print("  KARPA TESTNET CYCLE — netuid 16")
+    print("  RALPH TESTNET CYCLE — netuid 16")
     print("=" * 60)
 
     # Load chain (reads .env → BittensorChain)
-    chain = get_chain(KARPA_ROOT)
+    chain = get_chain(RALPH_ROOT)
 
     # Reset local chain state for clean run
-    chain_dir = KARPA_ROOT / "chain"
+    chain_dir = RALPH_ROOT / "chain"
     if chain_dir.exists():
         for f in ["king.json", "events.jsonl", "handshakes.jsonl"]:
             p = chain_dir / f
@@ -222,7 +222,7 @@ def main():
                 p.unlink()
 
     # Prepare data if needed
-    manifest = KARPA_ROOT / "data" / "data_manifest.json"
+    manifest = RALPH_ROOT / "data" / "data_manifest.json"
     if not manifest.exists():
         import subprocess
         print("\n[data] Generating synthetic data...")
@@ -233,7 +233,7 @@ def main():
             "--shard-tokens", "50000",
             "--total-tokens", "200000",
             "--eval-tokens", "10000",
-        ], cwd=KARPA_ROOT, check=True)
+        ], cwd=RALPH_ROOT, check=True)
 
     # --- Round 1: Miner green1 submits baseline ---
     res1 = submit_and_score(

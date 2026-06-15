@@ -4,7 +4,7 @@ regression` formula from whitepaper §5.5.
 
 v1.2 §5.4: single attested-execution tier. The two-tier credibility factor
 (α = 1.0 verified / α = 0.5 unverified) is RETIRED. Every miner runs the
-official Karpa container inside CC; anything without a valid attestation
+official Ralph container inside CC; anything without a valid attestation
 chain is rejected at op2. No discount factor on the cost denominator.
 
 For Phase 0 we keep it minimal and tunable: only quality and cost terms are
@@ -39,19 +39,19 @@ DOMINANT_QUALITY_MULTIPLIER = 3.0
 def get_king_rule() -> str:
     """Return the currently-active king-selection rule.
 
-    Reads the KARPA_KING_RULE environment variable; defaults to "legacy" which
+    Reads the RALPH_KING_RULE environment variable; defaults to "legacy" which
     is the v0.10-guarded version of the original score_bundle gate. The
     forthcoming "cross_scale_v1" rule (B3 of the Cross-Scale Downstream Pareto
-    build) will be selected via KARPA_KING_RULE=cross_scale_v1 once it ships;
+    build) will be selected via RALPH_KING_RULE=cross_scale_v1 once it ships;
     until then this function only returns "legacy" and a request for any other
     value falls back to "legacy" with a one-line warning to stderr.
     """
-    val = os.environ.get("KARPA_KING_RULE", "legacy").strip()
+    val = os.environ.get("RALPH_KING_RULE", "legacy").strip()
     if val in ("legacy", "cross_scale_v1"):
         return val
     import sys as _sys
     print(
-        f"[scoring] WARNING: KARPA_KING_RULE={val!r} not recognised; "
+        f"[scoring] WARNING: RALPH_KING_RULE={val!r} not recognised; "
         "falling back to 'legacy'. Valid values: legacy, cross_scale_v1.",
         file=_sys.stderr,
     )

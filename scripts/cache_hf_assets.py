@@ -1,8 +1,8 @@
-"""Cache + re-key the 4 private-hard HF datasets to canonical Karpa JSONL.
+"""Cache + re-key the 4 private-hard HF datasets to canonical Ralph JSONL.
 
 Pulls each of the 4 datasets in `eval/downstream/private_hard.HF_DATASET_IDS`
 from HuggingFace Hub via the `datasets` library, iterates the rows, and
-re-keys each into the canonical Karpa schema that
+re-keys each into the canonical Ralph schema that
 `private_hard.load_task_examples` consumes:
 
   * MC tasks (arc_challenge_hard, tiny_arc, tiny_mmlu):
@@ -321,7 +321,7 @@ def cache_all(
         ))
 
     manifest = {
-        "_meta": "karpa-private-hard-cache-manifest",
+        "_meta": "ralph-private-hard-cache-manifest",
         "version": "v1",
         "tasks": entries,
     }

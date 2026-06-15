@@ -59,7 +59,7 @@ from pathlib import Path
 import numpy as np
 
 # JSON header marker; bump on any schema change to the manifest.
-_MANIFEST_META = "karpa-sealed-pool-manifest"
+_MANIFEST_META = "ralph-sealed-pool-manifest"
 MANIFEST_VERSION = "v1"
 
 
@@ -346,7 +346,7 @@ def write_manifest(manifest: SealedStreamManifest, path: Path) -> None:
 
     Output schema (with `_meta` marker for the reader to validate):
       {
-        "_meta": "karpa-sealed-pool-manifest",
+        "_meta": "ralph-sealed-pool-manifest",
         "version": "v1",
         "streams_root_hash": "<sha256 hex>",
         "streams": [

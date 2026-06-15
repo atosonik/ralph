@@ -1,6 +1,6 @@
 """DCLM CORE-22 task registry + per-task evaluator (B1).
 
-Adapts DCLM's CORE-22 eval bundle to the Karpa downstream-eval harness.
+Adapts DCLM's CORE-22 eval bundle to the Ralph downstream-eval harness.
 The 22 tasks are pinned from DCLM's `low_variance_datasets` aggregation
 (see eval/downstream/DEFERRED.md B1-D3 for provenance). Each task is
 catalogued by:
@@ -330,7 +330,7 @@ def _read_jsonl(path: Path) -> list[dict]:
 def _parse_mc_row(row: dict, line_no: int) -> MCRawRow:
     """Parse one canonical MC JSONL row.
 
-    Schema (canonical Karpa form):
+    Schema (canonical Ralph form):
       {"id": str, "query": str, "choices": [str, ...], "gold": int}
 
     `id` is consumed by callers that need item-level keying (e.g.
@@ -446,7 +446,7 @@ def load_task_examples(
       * mode == "schema" → SchemaRawRow
       * mode == "lm"     → LMRawRow
 
-    The JSONL schema is the canonical Karpa form documented in
+    The JSONL schema is the canonical Ralph form documented in
     `_parse_mc_row` / `_parse_schema_row` / `_parse_lm_row`. If the
     DCLM bundle's per-task JSONLs use different keys, the
     downloader / mirror script (separate follow-up) is responsible for

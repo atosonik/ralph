@@ -22,8 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-KARPA_ROOT = Path(__file__).resolve().parent.parent
-AGENTS_DIR = KARPA_ROOT / "agents"
+RALPH_ROOT = Path(__file__).resolve().parent.parent
+AGENTS_DIR = RALPH_ROOT / "agents"
 
 
 def agent_root(agent_id: str) -> Path:

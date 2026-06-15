@@ -8,7 +8,7 @@ start to clean up anything a crashed previous session left behind.
 Rules:
   - Any local /root/.shadeform_instance_<name>.json with status != deleted
     and `kill_at` < now → DELETE via API.
-  - Any Shadeform instance whose Shadeform-side name starts with `karpa-`
+  - Any Shadeform instance whose Shadeform-side name starts with `ralph-`
     AND is not referenced by any local instance file → DELETE.
 
 Either rule firing prints a one-line warning to stderr. Exit code is 0
@@ -26,7 +26,7 @@ from pathlib import Path
 API_BASE = "https://api.shadeform.ai/v1"
 KEY_FILE = Path("/root/.shadeform_api_key")
 INSTANCE_FILE_PREFIX = "/root/.shadeform_instance_"
-INSTANCE_NAME_PREFIX = "karpa-"
+INSTANCE_NAME_PREFIX = "ralph-"
 
 
 def _api_key() -> str:
@@ -92,8 +92,8 @@ def sweep_kill_at_expired() -> int:
     return swept
 
 
-def sweep_unreferenced_karpa_instances() -> int:
-    """Pass 2: any Shadeform instance with name prefix `karpa-` AND not
+def sweep_unreferenced_ralph_instances() -> int:
+    """Pass 2: any Shadeform instance with name prefix `ralph-` AND not
     referenced by any local instance file → delete.
 
     Defends against instance files getting hand-deleted while their
@@ -124,7 +124,7 @@ def sweep_unreferenced_karpa_instances() -> int:
             continue
         if iid in known_ids:
             continue
-        if _delete_instance(iid, f"unreferenced karpa-* instance name={name!r}"):
+        if _delete_instance(iid, f"unreferenced ralph-* instance name={name!r}"):
             swept += 1
     return swept
 
@@ -132,11 +132,11 @@ def sweep_unreferenced_karpa_instances() -> int:
 def sweep(quiet: bool = False) -> dict:
     """Run both passes; return summary dict."""
     expired = sweep_kill_at_expired()
-    unreferenced = sweep_unreferenced_karpa_instances()
+    unreferenced = sweep_unreferenced_ralph_instances()
     total = expired + unreferenced
     if total > 0 or not quiet:
         print(
-            f"[sweep] swept {total} ({expired} expired kill_at, {unreferenced} unreferenced karpa-*)",
+            f"[sweep] swept {total} ({expired} expired kill_at, {unreferenced} unreferenced ralph-*)",
             file=sys.stderr,
         )
     return {"expired": expired, "unreferenced": unreferenced, "total": total}

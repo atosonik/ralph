@@ -104,9 +104,9 @@ This is a meaningful improvement for miner economics — closer to the **$0.05/s
 
 ### 4. Public-post correction needed
 
-The public Twitter/GH-Discussion posts ([twitter_posts/karpaai_account/11_cross_scale_downstream_pareto_pivot.md](../../twitter_posts/karpaai_account/11_cross_scale_downstream_pareto_pivot.md), [github_discussions/karpaai_repo/02_cross_scale_downstream_pareto_pivot.md](../../github_discussions/karpaai_repo/02_cross_scale_downstream_pareto_pivot.md)) reference "~70-minute run at d=768 / 124M nonembed params on FineWeb-Edu" as the S₃ rung. **That number is now empirically false** at the current spec. Two ways to handle:
+The public Twitter/GH-Discussion posts ([twitter_posts/RalphLabsAI_account/11_cross_scale_downstream_pareto_pivot.md](../../twitter_posts/RalphLabsAI_account/11_cross_scale_downstream_pareto_pivot.md), [github_discussions/RalphLabsAI_repo/02_cross_scale_downstream_pareto_pivot.md](../../github_discussions/RalphLabsAI_repo/02_cross_scale_downstream_pareto_pivot.md)) reference "~70-minute run at d=768 / 124M nonembed params on FineWeb-Edu" as the S₃ rung. **That number is now empirically false** at the current spec. Two ways to handle:
 
-1. **Adopt the measured number** and post a brief correction via the `/karpa-announce` skill (event-type=followup). Cleanest.
+1. **Adopt the measured number** and post a brief correction via the `/ralph-announce` skill (event-type=followup). Cleanest.
 2. **Raise total_steps to hit the original 70-min target.** Recommended steps for 70 min: **24,214** (vs 800). At 24k steps the model would see 397M tokens — far closer to Chinchilla-optimal for 124M (~2.5B tokens, 16% of optimal). Materially different recipe in research substance.
 
 Recommendation: **(1)**. The 800-step spec was pinned by the recommendation document with explicit token-budget reasoning; we should not move it just to recover an inaccurate time estimate. Issue the followup correction.
@@ -124,7 +124,7 @@ This is a B5 follow-up, not a Pre-work #4 deliverable.
 
 ## Sources
 
-* Run log: `/tmp/karpa_s3_measurement/run3.log` (local-only; not committed)
+* Run log: `/tmp/ralph_s3_measurement/run3.log` (local-only; not committed)
 * Recipe config: [`recipe/configs/h100_s3_d768_l12.json`](../../../recipe/configs/h100_s3_d768_l12.json)
 * Master plan: [`docs/build_scope/00_MASTER_PLAN.md`](../build_scope/00_MASTER_PLAN.md)
 * Recommendation (S₃ spec source): [`docs/king_criterion_review/00_RECOMMENDATION.md`](../king_criterion_review/00_RECOMMENDATION.md)

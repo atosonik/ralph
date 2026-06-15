@@ -1,4 +1,4 @@
-"""Validator-side GitHub operations on karpaai/recipe.
+"""Validator-side GitHub operations on RalphLabsAI/recipe.
 
 Two responsibilities:
   1. verify_pr_matches_bundle — confirm the open PR's diff is byte-equal to
@@ -8,8 +8,8 @@ Two responsibilities:
      the PR, tag the merge commit `recipe-vX.Y.Z`, and publish a release
      with the metrics in the body.
 
-Requires env var KARPA_BOT_GH_TOKEN — a PAT with `public_repo` scope on
-karpaai/recipe (the merge actor — recommend a dedicated karpa-bot account).
+Requires env var RALPH_BOT_GH_TOKEN — a PAT with `public_repo` scope on
+RalphLabsAI/recipe (the merge actor — recommend a dedicated ralph-bot account).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 GH_API = "https://api.github.com"
-RECIPE_REPO = "karpaai/recipe"
+RECIPE_REPO = "RalphLabsAI/recipe"
 
 
 def _gh(

@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from scripts.download_dclm_bundle import (
     _build_parser,
     download_and_verify,
@@ -135,7 +135,7 @@ def test_manifest_schema(tmp_path, monkeypatch):
     out_dir = tmp_path / "out"
     download_and_verify(url="https://example.com/foo.zip", output_dir=out_dir)
     manifest = json.loads((out_dir / "SHA256SUM").read_text())
-    assert manifest["_meta"] == "karpa-dclm-bundle-manifest"
+    assert manifest["_meta"] == "ralph-dclm-bundle-manifest"
     assert manifest["url"] == "https://example.com/foo.zip"
     assert len(manifest["sha256"]) == 64
     assert manifest["extracted_member_count"] == 1

@@ -185,11 +185,11 @@ in eval/downstream/. No fictional symbol references.
 **Owner:** B1 (op1 author)
 **Decision:** Add `eval/downstream/**` + `eval/private/downstream_pool/**` +
 `eval/private/hardness/**` + `eval/private/calibration/**` to
-`karpa/restricted_files.yaml` (NOT the imaginary
-`karpa/validator/restricted_files.yaml`).
+`ralph/restricted_files.yaml` (NOT the imaginary
+`ralph/validator/restricted_files.yaml`).
 **Recommendation:** Land in the same PR as core22.py.
 **Status:** **CLOSED 2026-06-11.** All four explicit globs added to
-`karpa/restricted_files.yaml`. Note: the existing `eval/**` glob already
+`ralph/restricted_files.yaml`. Note: the existing `eval/**` glob already
 matched these paths via `_path_matches`'s prefix/** semantics, so the
 new globs are functionally redundant — but they self-document the
 B1-specific protection and survive any future narrowing of `eval/**`.
@@ -215,7 +215,7 @@ is explicitly a mainnet-activation deliverable, not B1's. Rationale:
   attestation check splits the network), which is independently a B7
   concern.
 * During the B1 → B6 build window, miners can submit but the v0.10
-  legacy gate (`KARPA_KING_RULE=legacy`) is the rule that crowns kings.
+  legacy gate (`RALPH_KING_RULE=legacy`) is the rule that crowns kings.
   The new `eval/downstream/` modules are validator-side-only and don't
   need to be miner-attested yet.
 * The cost of waiting: a malicious patch could modify `eval/downstream/`
@@ -252,13 +252,13 @@ inclusion, nested-cells shape via asdict, dataclass equality semantics.
 ### B1-D13 — runner CLI structural-patch handling
 **Owner:** B1 (runner.py author)
 **Decision:** Does the structural-patch fallback path need `--patch` and
-`--karpa-root` CLI args? If yes, add them and budget for `apply_patch`
+`--ralph-root` CLI args? If yes, add them and budget for `apply_patch`
 integration (~150 LOC + 2 days). If no, document that structural patches
 WILL fail the new downstream runner and the legacy path handles them.
 **Recommendation:** Add the args. The whole point of B1 → B7 is that
 structural patches work cleanly under the new rule.
 **Status:** **CLOSED at CLI surface 2026-06-11.** `eval/downstream/
-runner_cli.py` accepts both `--patch` and `--karpa-root` arguments so the
+runner_cli.py` accepts both `--patch` and `--ralph-root` arguments so the
 CLI contract is stable; submissions without structural patches go through
 the no-patch path unchanged. Full `apply_patch` integration (the ~150 LOC
 + 2 day deliverable) is recorded as a separate follow-up PR: until that
@@ -356,7 +356,7 @@ schema-versioning test).
   uses `torch.load(weights_only=True)` and documents that
   forward()-code containment is OS-level subprocess isolation only.
 - **B1-D13 (structural-patch CLI args)** — closed at CLI surface;
-  --patch / --karpa-root accepted; full apply_patch integration
+  --patch / --ralph-root accepted; full apply_patch integration
   recorded as a separate follow-up PR.
 
 Now 11 of 15 items closed, 4 still open: B1-D4 (CC-BY-SA legal

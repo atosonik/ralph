@@ -29,9 +29,9 @@ from pathlib import Path
 # Make `chain_layer`, `validator`, `eval` importable when run from anywhere.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401, E402
+import ralph_bootstrap  # noqa: F401, E402
 from chain_layer.local import LocalChain  # noqa: E402
-from eval.downstream.runner import KARPA_VOCAB_SIZE  # noqa: E402
+from eval.downstream.runner import RALPH_VOCAB_SIZE  # noqa: E402
 from validator.ladder import (  # noqa: E402
     EVAL_MODE_LEGACY,
     EVAL_MODE_V011,
@@ -43,7 +43,7 @@ from validator.ladder import (  # noqa: E402
 )
 
 # Path to the synthetic subprocess entrypoint that ships with the test
-# suite. The CLI is controlled by KARPA_TEST_RUNNER_MODE env var; we set
+# suite. The CLI is controlled by RALPH_TEST_RUNNER_MODE env var; we set
 # it to "success" so the entrypoint writes a deterministic report.
 _TEST_ENTRY = Path(__file__).resolve().parent.parent / "tests" / "_runner_subprocess_test_entry.py"
 
@@ -65,7 +65,7 @@ def run_smoke(workdir: Path) -> dict:
         branch_id="main",
         bundle_hash="smoke_bundle_hash",
         miner_hotkey="5F_smoke_miner",
-        vocab_size=KARPA_VOCAB_SIZE,
+        vocab_size=RALPH_VOCAB_SIZE,
     )
     accept = accept_submission(sub, chain, now_iso="2026-06-12T00:00:00Z")
     if not accept.accepted:
@@ -87,13 +87,13 @@ def run_smoke(workdir: Path) -> dict:
     )
     fake_checkpoint = workdir / "fake.ckpt"
     fake_checkpoint.write_bytes(b"")  # validator never reads it; entry stub is in env-mode "success"
-    fake_karpa_root = workdir / "karpa_root"
-    fake_karpa_root.mkdir()
+    fake_ralph_root = workdir / "ralph_root"
+    fake_ralph_root.mkdir()
 
-    # The synthetic CLI reads KARPA_TEST_RUNNER_MODE; force "success" here.
+    # The synthetic CLI reads RALPH_TEST_RUNNER_MODE; force "success" here.
     # run_eval_in_subprocess inherits the parent env by default, so
     # setting os.environ here propagates to the child.
-    os.environ["KARPA_TEST_RUNNER_MODE"] = "success"
+    os.environ["RALPH_TEST_RUNNER_MODE"] = "success"
 
     # We pass a command_prefix that points at the test entry; one
     # subprocess per rung is invoked under the hood.
@@ -104,7 +104,7 @@ def run_smoke(workdir: Path) -> dict:
         sub,
         config,
         checkpoint_path=fake_checkpoint,
-        karpa_root=fake_karpa_root,
+        ralph_root=fake_ralph_root,
         mode=EVAL_MODE_V011,
         command_prefix=command_prefix,
         timeout_s_per_rung=30.0,
@@ -119,7 +119,7 @@ def run_smoke(workdir: Path) -> dict:
         sub,
         config,
         checkpoint_path=fake_checkpoint,
-        karpa_root=fake_karpa_root,
+        ralph_root=fake_ralph_root,
         mode=EVAL_MODE_LEGACY,
         command_prefix=command_prefix,  # ignored under legacy
         legacy_val_bpb=1.5,
@@ -153,7 +153,7 @@ def run_smoke(workdir: Path) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns 0 on success, 1 on failure."""
-    workdir = Path(tempfile.mkdtemp(prefix="karpa_b4_smoke_"))
+    workdir = Path(tempfile.mkdtemp(prefix="ralph_b4_smoke_"))
     try:
         summary = run_smoke(workdir)
         print(json.dumps(summary, indent=2, sort_keys=True))

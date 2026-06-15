@@ -24,7 +24,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from eval.sealed_streams import (
     MANIFEST_VERSION,
     SealedStreamBatch,
@@ -410,7 +410,7 @@ class TestManifestJson:
         path = tmp_path / "manifest.json"
         write_manifest(manifest, path)
         loaded = json.loads(path.read_text())
-        assert loaded["_meta"] == "karpa-sealed-pool-manifest"
+        assert loaded["_meta"] == "ralph-sealed-pool-manifest"
         assert loaded["version"] == MANIFEST_VERSION
 
     def test_human_readable_output(self, tmp_path):
@@ -436,7 +436,7 @@ class TestManifestJson:
     def test_read_rejects_wrong_version(self, tmp_path):
         path = tmp_path / "bad.json"
         path.write_text(json.dumps({
-            "_meta": "karpa-sealed-pool-manifest",
+            "_meta": "ralph-sealed-pool-manifest",
             "version": "v999",
             "streams": [],
         }))
@@ -446,7 +446,7 @@ class TestManifestJson:
     def test_read_rejects_missing_streams_key(self, tmp_path):
         path = tmp_path / "bad.json"
         path.write_text(json.dumps({
-            "_meta": "karpa-sealed-pool-manifest",
+            "_meta": "ralph-sealed-pool-manifest",
             "version": MANIFEST_VERSION,
         }))
         with pytest.raises(ValueError, match=r"missing 'streams'"):
@@ -457,7 +457,7 @@ class TestManifestJson:
         the streams_root_hash wasn't updated raises ValueError."""
         path = tmp_path / "manifest.json"
         path.write_text(json.dumps({
-            "_meta": "karpa-sealed-pool-manifest",
+            "_meta": "ralph-sealed-pool-manifest",
             "version": MANIFEST_VERSION,
             "streams_root_hash": "f" * 64,  # fake root hash
             "streams": [{

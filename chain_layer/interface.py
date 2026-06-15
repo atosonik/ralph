@@ -1,7 +1,7 @@
 """
 Abstract interface for chain operations.
 
-Every operation the Karpa protocol needs from "the chain":
+Every operation the Ralph protocol needs from "the chain":
   1. Handshake: miner announces proof-test intent, gets a nonce
   2. Hotkey verification: confirm a hotkey is registered on the subnet
   3. Weight setting: validator publishes scores for miners

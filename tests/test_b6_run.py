@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import karpa_bootstrap  # noqa: F401
+import ralph_bootstrap  # noqa: F401
 from scripts.b6_run import (
     DEFAULT_BUDGET_CAP_USD,
     DEFAULT_N_RECIPES,
@@ -37,7 +37,7 @@ _TEST_COMMAND_PREFIX = (sys.executable, str(_TEST_ENTRY))
 
 @pytest.fixture(autouse=True)
 def _set_test_mode(monkeypatch):
-    monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "success")
+    monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "success")
     yield
 
 
@@ -151,11 +151,11 @@ def test_run_one_recipe_success(tmp_path, single_rung):
         tasks=("arc_easy",),
     )
     spec.checkpoint.write_bytes(b"")
-    karpa_root = tmp_path / "karpa_root"
-    karpa_root.mkdir()
+    ralph_root = tmp_path / "ralph_root"
+    ralph_root.mkdir()
     result = run_one_recipe(
         spec,
-        karpa_root=karpa_root,
+        ralph_root=ralph_root,
         bundle_dir=tmp_path / "bundle",
         bundle_sha256="x",
         output_dir=tmp_path / "out",
@@ -190,7 +190,7 @@ def test_run_one_recipe_retry_on_first_failure(tmp_path, single_rung):
         tasks=("arc_easy",),
     )
     spec.checkpoint.write_bytes(b"")
-    (tmp_path / "karpa_root").mkdir()
+    (tmp_path / "ralph_root").mkdir()
 
     call_count = {"n": 0}
 
@@ -227,7 +227,7 @@ def test_run_one_recipe_retry_on_first_failure(tmp_path, single_rung):
     with mock.patch("scripts.b6_run.run_ladder_eval", side_effect=fake_run_ladder_eval):
         result = run_one_recipe(
             spec,
-            karpa_root=tmp_path / "karpa_root",
+            ralph_root=tmp_path / "ralph_root",
             bundle_dir=tmp_path / "bundle",
             bundle_sha256="x",
             output_dir=tmp_path / "out",
@@ -242,8 +242,8 @@ def test_run_one_recipe_retry_on_first_failure(tmp_path, single_rung):
 
 
 def test_run_one_recipe_both_seeds_fail(tmp_path, monkeypatch, single_rung):
-    monkeypatch.setenv("KARPA_TEST_RUNNER_MODE", "nonzero")
-    monkeypatch.setenv("KARPA_TEST_RUNNER_EXIT_CODE", "9")
+    monkeypatch.setenv("RALPH_TEST_RUNNER_MODE", "nonzero")
+    monkeypatch.setenv("RALPH_TEST_RUNNER_EXIT_CODE", "9")
     spec = RecipeSpec(
         id="r_fail",
         checkpoint=tmp_path / "r.pt",
@@ -252,10 +252,10 @@ def test_run_one_recipe_both_seeds_fail(tmp_path, monkeypatch, single_rung):
         tasks=("arc_easy",),
     )
     spec.checkpoint.write_bytes(b"")
-    (tmp_path / "karpa_root").mkdir()
+    (tmp_path / "ralph_root").mkdir()
     result = run_one_recipe(
         spec,
-        karpa_root=tmp_path / "karpa_root",
+        ralph_root=tmp_path / "ralph_root",
         bundle_dir=tmp_path / "bundle",
         bundle_sha256="x",
         output_dir=tmp_path / "out",
@@ -291,10 +291,10 @@ def _make_specs(n: int, tmp_path: Path) -> list[RecipeSpec]:
 
 def test_run_b6_summary_counts_succeeded(tmp_path, single_rung):
     specs = _make_specs(3, tmp_path)
-    (tmp_path / "karpa_root").mkdir()
+    (tmp_path / "ralph_root").mkdir()
     summary = run_b6(
         specs,
-        karpa_root=tmp_path / "karpa_root",
+        ralph_root=tmp_path / "ralph_root",
         bundle_dir=tmp_path / "bundle",
         bundle_sha256="x",
         output_dir=tmp_path / "run_out",
@@ -313,10 +313,10 @@ def test_run_b6_budget_guard_short_circuits_remaining(tmp_path, single_rung):
     starts at 0), but all subsequent ones get budget_exhausted once the
     first one's cost is added."""
     specs = _make_specs(3, tmp_path)
-    (tmp_path / "karpa_root").mkdir()
+    (tmp_path / "ralph_root").mkdir()
     summary = run_b6(
         specs,
-        karpa_root=tmp_path / "karpa_root",
+        ralph_root=tmp_path / "ralph_root",
         bundle_dir=tmp_path / "bundle",
         bundle_sha256="x",
         output_dir=tmp_path / "run_out",
@@ -352,7 +352,7 @@ def test_cli_required_args(tmp_path):
 def test_cli_minimal(tmp_path):
     parser = _build_parser()
     args = parser.parse_args([
-        "--karpa-root", str(tmp_path),
+        "--ralph-root", str(tmp_path),
         "--bundle-dir", str(tmp_path / "bundle"),
         "--bundle-sha-sha256", "x",
         "--recipes-config", str(tmp_path / "cfg.json"),

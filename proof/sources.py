@@ -21,7 +21,7 @@ _PROTOCOL_FILES = ("restricted_files.yaml", "README.md")
 
 
 def list_proof_sources(
-    karpa_root: Path,
+    ralph_root: Path,
     recipe_dir: Path | None = None,
 ) -> list[tuple[Path, Path]]:
     """Return a sorted list of (base, relative_path) tuples that contribute to
@@ -31,21 +31,21 @@ def list_proof_sources(
     of filesystem layout.
 
     Args:
-        karpa_root: the protocol repo root.
+        ralph_root: the protocol repo root.
         recipe_dir: the recipe repo root. If None, expects the recipe dirs to
-            live under karpa_root (legacy single-repo layout).
+            live under ralph_root (legacy single-repo layout).
     """
-    karpa_root = Path(karpa_root).resolve()
+    ralph_root = Path(ralph_root).resolve()
     pairs: list[tuple[Path, Path]] = []
 
     if recipe_dir is not None:
         recipe_dir = Path(recipe_dir).resolve()
         bases: Iterable[tuple[Path, tuple[str, ...]]] = (
             (recipe_dir, _RECIPE_DIRS),
-            (karpa_root, _PROTOCOL_DIRS),
+            (ralph_root, _PROTOCOL_DIRS),
         )
     else:
-        bases = ((karpa_root, _RECIPE_DIRS + _PROTOCOL_DIRS),)
+        bases = ((ralph_root, _RECIPE_DIRS + _PROTOCOL_DIRS),)
 
     for base, dirs in bases:
         for d in dirs:
@@ -62,9 +62,9 @@ def list_proof_sources(
                 pairs.append((base, p.relative_to(base)))
 
     for fname in _PROTOCOL_FILES:
-        fp = karpa_root / fname
+        fp = ralph_root / fname
         if fp.exists():
-            pairs.append((karpa_root, Path(fname)))
+            pairs.append((ralph_root, Path(fname)))
 
     # Canonical ordering: by POSIX relative path, ignoring which base it came from.
     pairs.sort(key=lambda x: x[1].as_posix())
@@ -72,7 +72,7 @@ def list_proof_sources(
 
 
 def compute_container_measurement(
-    karpa_root: Path,
+    ralph_root: Path,
     recipe_dir: Path | None = None,
 ) -> str:
     """Compute the container_measurement: a hash over the canonical source tree.
@@ -83,7 +83,7 @@ def compute_container_measurement(
     import hashlib
 
     h = hashlib.sha256()
-    for base, rel in list_proof_sources(karpa_root, recipe_dir):
+    for base, rel in list_proof_sources(ralph_root, recipe_dir):
         h.update(rel.as_posix().encode("utf-8"))
         h.update(b"\x00")
         h.update((base / rel).read_bytes())

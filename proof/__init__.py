@@ -1,6 +1,6 @@
 """
 Phase 0 proof-test runner — Python entry-point standing in for the future
-Karpa Docker. In Phase 0.5+ this becomes a signed Docker image whose
+Ralph Docker. In Phase 0.5+ this becomes a signed Docker image whose
 measurement is on-chain pinned, and the mock attestation is replaced by
 real TDX + nvtrust quotes.
 
