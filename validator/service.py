@@ -428,6 +428,8 @@ def run_epoch(
     audit_reports_enabled: bool = True,
     netuid: int = 40,
     eval_seed: int = 0,
+    hf_publish_enabled: bool = False,
+    hf_audit_repo: str | None = None,
 ) -> dict:
     """Process all pending submissions in one epoch.
 
@@ -803,13 +805,15 @@ def run_epoch(
             # Reuse hf_pr_info read at the top of the king-change block.
             if hf_pr_info is not None:
                 hf_pr = hf_pr_info
-                hf_token = os.environ.get("RALPH_BOT_HF_TOKEN") or os.environ.get("HF_TOKEN", "")
-                if hf_token:
+                # Distinct local — must NOT shadow run_epoch's `hf_token` param,
+                # which the end-of-epoch audit-report HF publish reuses below.
+                hf_bot_token = os.environ.get("RALPH_BOT_HF_TOKEN") or os.environ.get("HF_TOKEN", "")
+                if hf_bot_token:
                     from validator.hf_bot import merge_pr as hf_merge_pr
                     res = hf_merge_pr(
                         repo_id=hf_pr["repo_id"],
                         pr_num=hf_pr["pr_num"],
-                        token=hf_token,
+                        token=hf_bot_token,
                         comment=(
                             f"Crowned king. val_bpb={result['val_bpb']:.4f}, "
                             f"quality_gain={result['quality_gain']:+.4f}, "
@@ -865,7 +869,7 @@ def run_epoch(
                 "next-epoch retry. No credit was lost."
             )
 
-    # validation-v2 Phase 1: owner-validator audit report + on-chain anchor.
+    # validation-v2 Phase 1: validator audit report + on-chain anchor.
     # Build report_json from this epoch's scored results, hash + sign, anchor
     # the hash on-chain, and write the signed envelope locally.
     #
@@ -891,6 +895,9 @@ def run_epoch(
                 netuid=netuid,
                 eval_seed=eval_seed,
                 weights_set=weights_set,
+                hf_publish_enabled=hf_publish_enabled,
+                hf_audit_repo=hf_audit_repo,
+                hf_token=hf_token,
             )
         except Exception as e:
             log_warn(f"audit-report generation failed (scoring/weights unaffected): {e}")
@@ -908,6 +915,9 @@ def _generate_audit_report(
     netuid: int,
     eval_seed: int,
     weights_set: bool = False,
+    hf_publish_enabled: bool = False,
+    hf_audit_repo: str | None = None,
+    hf_token: str | None = None,
 ) -> None:
     """Build, hash, sign, on-chain-anchor, and persist the per-epoch audit
     report (validation-v2 Phase 1).
@@ -976,7 +986,15 @@ def _generate_audit_report(
 
     from validator.audit_report import write_report
     out_dir = getattr(chain, "chain_dir", None) or RALPH_ROOT
-    report_path = write_report(envelope, Path(out_dir))
+    report_path = write_report(
+        envelope,
+        Path(out_dir),
+        hf_publish_enabled=hf_publish_enabled,
+        hf_repo=hf_audit_repo,
+        hf_token=hf_token,
+    )
+    if hf_publish_enabled:
+        log_info(f"audit report HF-publish requested: {hf_audit_repo or 'RalphLabsAI/audit-reports'}")
     log_info(
         f"audit report committed: epoch={epoch_id} sha={sha[:16]}... "
         f"block={commitment_block} ({len(scored_results)} submissions) -> {report_path}"
@@ -1001,6 +1019,21 @@ def main():
                    help="HuggingFace API token (defaults to $HF_TOKEN)")
     p.add_argument("--hf-limit", type=int, default=10,
                    help="Max bundles to download per epoch (default: 10)")
+    p.add_argument(
+        "--hf-publish-audit",
+        action="store_true",
+        default=os.environ.get("RALPH_HF_PUBLISH_AUDIT", "").strip().lower()
+        in {"1", "true", "yes", "on"},
+        help=(
+            "Publish per-epoch audit reports to the HF dataset repo "
+            "(prod only; default off). Also enabled via RALPH_HF_PUBLISH_AUDIT=1."
+        ),
+    )
+    p.add_argument(
+        "--hf-audit-repo",
+        default=os.environ.get("RALPH_HF_AUDIT_REPO", "RalphLabsAI/audit-reports"),
+        help="HF dataset repo for audit reports (default: RalphLabsAI/audit-reports)",
+    )
     p.add_argument("--once", action="store_true", help="Run one epoch then exit")
     args = p.parse_args()
 
@@ -1041,6 +1074,8 @@ def main():
                 hf_repo=args.hf_repo or None,
                 hf_token=args.hf_token,
                 hf_limit=args.hf_limit,
+                hf_publish_enabled=args.hf_publish_audit,
+                hf_audit_repo=args.hf_audit_repo,
             )
             if result["submissions"] > 0:
                 mf = result.get("meaningful_failures", 0)

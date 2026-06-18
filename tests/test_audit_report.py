@@ -13,6 +13,7 @@ A fixed `generated_at` is used everywhere so the report is deterministic.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -415,3 +416,133 @@ def test_write_report_and_index(tmp_path):
     index = json.loads((tmp_path / "audit_reports" / "index.json").read_text())
     epoch_ids = sorted(e["epoch_id"] for e in index)
     assert epoch_ids == ["40-400", "40-500"]
+
+
+# --------------------------------------------------------------------------
+# Phase 2 (A): HF publish — gated, idempotent, never breaks the local write.
+# --------------------------------------------------------------------------
+
+
+class _FakeHfApi:
+    """Records create_repo / upload_file calls; never touches the network.
+
+    Mimics the slice of huggingface_hub.HfApi that audit_publish uses, plus
+    hf_hub_download so _fetch_remote_index can read back an uploaded index.
+    """
+
+    def __init__(self, token=None):
+        self.token = token
+        self.created = []
+        self.uploads = {}  # path_in_repo -> bytes
+
+    def create_repo(self, repo_id, repo_type=None, exist_ok=False, token=None):
+        self.created.append((repo_id, repo_type, exist_ok))
+
+    def upload_file(self, *, path_or_fileobj, path_in_repo, repo_id, repo_type,
+                    token=None, commit_message=None):
+        data = path_or_fileobj
+        if hasattr(data, "read"):
+            data = data.read()
+        self.uploads[path_in_repo] = data
+
+    def hf_hub_download(self, *, repo_id, repo_type, filename, token=None):
+        # Serve back whatever upload_file last stored for this filename.
+        import tempfile
+        if filename not in self.uploads:
+            from huggingface_hub.errors import EntryNotFoundError
+            raise EntryNotFoundError(f"{filename} not found")
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "wb") as f:
+            data = self.uploads[filename]
+            f.write(data if isinstance(data, bytes) else data.encode("utf-8"))
+        return path
+
+
+def _signed_env(epoch_id="40-700"):
+    from bittensor_wallet import Keypair
+
+    kp = Keypair.create_from_uri("//PublishTest")
+    report = build_report_json(
+        epoch_id=epoch_id, netuid=40, start_block=690, end_block=700,
+        generated_at=FIXED_GENERATED_AT, scored=[_scored_king()],
+        weight_snapshot={"5Hkingalpha": 1.0},
+    )
+    sig = sign_report(canonical_json(report), kp)
+    return build_envelope(
+        report, signature=sig, signer_hotkey=kp.ss58_address,
+        chain_commitment_block=700, weights_set=True,
+    )
+
+
+def test_publish_report_hf_uploads_envelope_and_index(monkeypatch):
+    import validator.audit_publish as ap
+
+    fake = _FakeHfApi()
+    monkeypatch.setattr(ap, "HfApi", lambda token=None: fake, raising=False)
+    # HfApi is imported inside the function — patch the module symbol the
+    # function resolves via `from huggingface_hub import HfApi`.
+    import huggingface_hub
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda token=None: fake)
+
+    env = _signed_env("40-700")
+    ok = ap.publish_report_hf(env, repo_id="RalphLabsAI/audit-reports", token="x")
+    assert ok is True
+
+    # dataset repo created exist_ok; envelope + index uploaded under audit_reports/.
+    assert fake.created and fake.created[0][1] == "dataset" and fake.created[0][2] is True
+    assert "audit_reports/40-700.json" in fake.uploads
+    assert "audit_reports/index.json" in fake.uploads
+
+    idx = json.loads(fake.uploads["audit_reports/index.json"])
+    assert isinstance(idx, list) and idx[0]["epoch_id"] == "40-700"
+    assert idx[0]["report_sha256"] == env["report_sha256"]
+
+
+def test_publish_report_hf_index_upsert_is_idempotent(monkeypatch):
+    import huggingface_hub
+
+    import validator.audit_publish as ap
+
+    fake = _FakeHfApi()
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda token=None: fake)
+
+    ap.publish_report_hf(_signed_env("40-700"), token="x")
+    ap.publish_report_hf(_signed_env("40-710"), token="x")
+    ap.publish_report_hf(_signed_env("40-700"), token="x")  # re-publish -> no dup
+
+    idx = json.loads(fake.uploads["audit_reports/index.json"])
+    epoch_ids = sorted(e["epoch_id"] for e in idx)
+    assert epoch_ids == ["40-700", "40-710"]
+
+
+def test_write_report_hf_publish_gated_off_by_default(tmp_path, monkeypatch):
+    """hf_publish_enabled defaults False -> publish_report_hf is never called,
+    local write still happens."""
+    import validator.audit_publish as ap
+
+    called = {"n": 0}
+
+    def _boom(*a, **k):
+        called["n"] += 1
+        raise AssertionError("should not be called when gated off")
+
+    monkeypatch.setattr(ap, "publish_report_hf", _boom)
+    env = _signed_env("40-720")
+    path = write_report(env, tmp_path)  # default: hf_publish_enabled=False
+    assert path.exists()
+    assert called["n"] == 0
+
+
+def test_write_report_hf_publish_failure_never_breaks_local(tmp_path, monkeypatch):
+    """A publish exception is swallowed; the local report is still written."""
+    import validator.audit_publish as ap
+
+    monkeypatch.setattr(
+        ap, "publish_report_hf",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HF down")),
+    )
+    env = _signed_env("40-730")
+    path = write_report(env, tmp_path, hf_publish_enabled=True, hf_token="x")
+    assert path.exists()
+    loaded = json.loads(path.read_text())
+    assert loaded["report_sha256"] == env["report_sha256"]

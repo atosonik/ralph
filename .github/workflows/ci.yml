@@ -38,7 +38,7 @@ jobs:
           python -m pip install --upgrade pip
           # CPU-only torch is enough for the test suite (smoke models on CPU).
           pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install pytest cryptography pynacl pyyaml requests numpy tiktoken
+          pip install pytest cryptography pynacl pyyaml requests numpy tiktoken huggingface-hub
           # bittensor is large + pulls async-substrate; only install when
           # tests need it (currently audit_scheduler + chain_layer tests).
           pip install bittensor || echo "bittensor install failed, marking those tests as expected-skip"
