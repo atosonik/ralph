@@ -211,7 +211,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--epoch", default=None, help="Audit only this epoch_id and exit.")
     p.add_argument("--repo", default=None, help=f"HF dataset repo (default {DEFAULT_AUDIT_REPO}).")
     p.add_argument("--netuid", type=int, default=None, help="Subnet netuid (default 40).")
-    p.add_argument("--subtensor-url", dest="subtensor_url", default=None, help=f"Archive endpoint (default {ARCHIVE_ENDPOINT_DEFAULT}).")
+    p.add_argument(
+        "--subtensor-url", dest="subtensor_url", default=None,
+        help=f"Archive endpoint (default {ARCHIVE_ENDPOINT_DEFAULT}).",
+    )
     p.add_argument("-v", "--verbose", action="store_true", help="Debug logging.")
     args = p.parse_args(argv)
 
