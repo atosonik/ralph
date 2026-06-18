@@ -26,7 +26,7 @@ replay trusts the published classification for those and notes it in
 ## Install (CPU-only, ~50 MB RAM)
 
 ```bash
-pip install httpx click bittensor       # bittensor: archive chain reads + Keypair
+pip install requests bittensor          # bittensor: archive chain reads + Keypair
 ```
 
 `bittensor` is already a Ralph dependency; no GPU/torch eval stack is exercised

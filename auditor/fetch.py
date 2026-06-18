@@ -13,7 +13,7 @@ validator.audit_publish, so local and remote stores are byte-shaped the same.
 
 from __future__ import annotations
 
-import httpx
+import requests
 
 DEFAULT_AUDIT_REPO = "RalphLabsAI/audit-reports"
 _REPO_SUBDIR = "audit_reports"
@@ -31,9 +31,11 @@ class ReportClient:
     ) -> None:
         self.repo_id = repo_id
         self.revision = revision
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
-        # follow_redirects: HF resolve URLs 302 to the CDN.
-        self._client = httpx.Client(timeout=timeout, follow_redirects=True, headers=headers)
+        self._timeout = timeout
+        # requests follows the HF resolve 302 -> CDN redirect by default.
+        self._session = requests.Session()
+        if token:
+            self._session.headers["Authorization"] = f"Bearer {token}"
 
     def _resolve_url(self, path_in_repo: str) -> str:
         return (
@@ -45,7 +47,7 @@ class ReportClient:
         """Return the index.json list (one thin entry per epoch). Empty list if
         the index doesn't exist yet."""
         url = self._resolve_url(f"{_REPO_SUBDIR}/index.json")
-        r = self._client.get(url)
+        r = self._session.get(url, timeout=self._timeout)
         if r.status_code == 404:
             return []
         r.raise_for_status()
@@ -55,12 +57,12 @@ class ReportClient:
     def get_report(self, epoch_id: str) -> dict:
         """Return the full signed report envelope for one epoch_id."""
         url = self._resolve_url(f"{_REPO_SUBDIR}/{epoch_id}.json")
-        r = self._client.get(url)
+        r = self._session.get(url, timeout=self._timeout)
         r.raise_for_status()
         return r.json()
 
     def close(self) -> None:
-        self._client.close()
+        self._session.close()
 
 
 __all__ = ["DEFAULT_AUDIT_REPO", "ReportClient"]

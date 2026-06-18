@@ -31,6 +31,7 @@ Env:
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -43,8 +44,6 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-
-import click  # noqa: E402
 
 from auditor.chain import ARCHIVE_ENDPOINT_DEFAULT, ChainClient  # noqa: E402
 from auditor.diff import compare_weights  # noqa: E402
@@ -193,31 +192,34 @@ def audit_new_epochs(chain: ChainClient, api: ReportClient) -> int:
     return worst
 
 
-@click.command(
-    context_settings={"help_option_names": ["-h", "--help"]},
-    help=(
-        "Ralph auditor — independent CPU-only verifier for subnet 40.\n\n"
-        "Runs Gate 1 (hash + on-chain commitment + signature), Gate 2 (weight "
-        "replay from published data), and Gate 3 (weight diff, tol 1e-4) against "
-        "a validator's published audit reports.\n\n"
-        "Exit codes: 0 clean, 1 hash-or-sig fail, 2 math diverge, 3 network.\n\n"
-        "Needs an ARCHIVE subtensor (SUBTENSOR_URL) because each epoch's "
-        "commitment overwrites the last."
-    ),
-)
-@click.option("--once", is_flag=True, help="Run one audit pass over new epochs and exit.")
-@click.option("--loop", "loop_", is_flag=True, help="Run continuously every AUDIT_INTERVAL_SECONDS.")
-@click.option("--epoch", "epoch", default=None, help="Audit only this epoch_id and exit.")
-@click.option("--repo", default=None, help=f"HF dataset repo (default {DEFAULT_AUDIT_REPO}).")
-@click.option("--netuid", type=int, default=None, help="Subnet netuid (default 40).")
-@click.option("--subtensor-url", default=None, help=f"Archive endpoint (default {ARCHIVE_ENDPOINT_DEFAULT}).")
-@click.option("-v", "--verbose", is_flag=True, help="Debug logging.")
-def main(once, loop_, epoch, repo, netuid, subtensor_url, verbose) -> None:
-    _setup_logging(verbose)
+def main(argv: list[str] | None = None) -> None:
+    p = argparse.ArgumentParser(
+        prog="auditor",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Ralph auditor — independent CPU-only verifier for subnet 40.\n"
+            "Gate 1 (hash + on-chain commitment + signature), Gate 2 (weight "
+            "replay from published data), Gate 3 (weight diff, tol 1e-4) against\n"
+            "a validator's published audit reports.\n"
+            "Exit codes: 0 clean, 1 hash-or-sig fail, 2 math diverge, 3 network.\n"
+            "Needs an ARCHIVE subtensor (SUBTENSOR_URL) — each epoch's "
+            "commitment overwrites the last."
+        ),
+    )
+    p.add_argument("--once", action="store_true", help="Run one audit pass over new epochs and exit.")
+    p.add_argument("--loop", dest="loop_", action="store_true", help="Run continuously every AUDIT_INTERVAL_SECONDS.")
+    p.add_argument("--epoch", default=None, help="Audit only this epoch_id and exit.")
+    p.add_argument("--repo", default=None, help=f"HF dataset repo (default {DEFAULT_AUDIT_REPO}).")
+    p.add_argument("--netuid", type=int, default=None, help="Subnet netuid (default 40).")
+    p.add_argument("--subtensor-url", dest="subtensor_url", default=None, help=f"Archive endpoint (default {ARCHIVE_ENDPOINT_DEFAULT}).")
+    p.add_argument("-v", "--verbose", action="store_true", help="Debug logging.")
+    args = p.parse_args(argv)
 
-    repo = repo or os.environ.get("AUDIT_REPO", DEFAULT_AUDIT_REPO)
-    netuid = netuid if netuid is not None else int(os.environ.get("NETUID", "40"))
-    subtensor_url = subtensor_url or os.environ.get("SUBTENSOR_URL", ARCHIVE_ENDPOINT_DEFAULT)
+    _setup_logging(args.verbose)
+
+    repo = args.repo or os.environ.get("AUDIT_REPO", DEFAULT_AUDIT_REPO)
+    netuid = args.netuid if args.netuid is not None else int(os.environ.get("NETUID", "40"))
+    subtensor_url = args.subtensor_url or os.environ.get("SUBTENSOR_URL", ARCHIVE_ENDPOINT_DEFAULT)
     interval = int(os.environ.get("AUDIT_INTERVAL_SECONDS", "300"))
     validator_hotkey = os.environ.get("VALIDATOR_HOTKEY") or None
     token = os.environ.get("HF_TOKEN") or None
@@ -225,10 +227,10 @@ def main(once, loop_, epoch, repo, netuid, subtensor_url, verbose) -> None:
     chain = ChainClient(subtensor_url=subtensor_url, netuid=netuid, validator_hotkey=validator_hotkey)
     api = ReportClient(repo_id=repo, token=token)
 
-    if epoch:
-        sys.exit(audit_epoch(epoch, chain, api))
+    if args.epoch:
+        sys.exit(audit_epoch(args.epoch, chain, api))
 
-    if loop_:
+    if args.loop_:
         while True:
             try:
                 audit_new_epochs(chain, api)
