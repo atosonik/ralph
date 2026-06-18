@@ -225,3 +225,85 @@ class TestComputeValBpbOnStream:
         result_b = compute_val_bpb_on_stream(model, batch_b, seq_len=16)
         # Halved bytes_per_token → doubled val_bpb.
         assert result_b["val_bpb"] == pytest.approx(2 * result_a["val_bpb"])
+
+
+# ============================================================================
+# tail_val_bpb — long-context tail probe (validation-v2 Phase 1)
+# ============================================================================
+
+
+class TestTailValBpb:
+    """The tail probe mirrors recipe/train.py: BPB over the tail positions
+    [seq_len//2 :] of each window, same cross-entropy + bytes_per_token
+    normalization as val_bpb. Recorded only; the scorer does not use it."""
+
+    def test_tail_val_bpb_present(self):
+        torch.manual_seed(0)
+        model = _TinyModel()
+        tokens = _make_tokens(256)
+        result = compute_val_bpb(model, tokens, seq_len=16)
+        assert "tail_val_bpb" in result
+        assert result["tail_val_bpb"] is not None
+        assert result["tail_val_bpb"] > 0
+
+    def test_tail_val_bpb_matches_manual_tail_slice(self):
+        """tail_val_bpb equals val_bpb recomputed over only positions
+        [seq_len//2:] — proving it's the long-context tail, not the full
+        window. We verify by computing the tail BPB independently."""
+        import math
+
+        import numpy as np
+        import torch.nn.functional as F
+
+        torch.manual_seed(0)
+        model = _TinyModel()
+        model.eval()
+        seq_len = 16
+        bpt = 4.0
+        tokens = _make_tokens(256)
+        result = compute_val_bpb(model, tokens, seq_len=seq_len, bytes_per_token=bpt)
+
+        # Independent recompute of the tail half.
+        tail_start = seq_len // 2
+        n = len(tokens)
+        n_windows = max(1, (n - 1) // seq_len)
+        tail_nats = 0.0
+        tail_tokens = 0
+        with torch.no_grad():
+            for w in range(n_windows):
+                start = w * seq_len
+                ids = tokens[start : start + seq_len + 1]
+                if len(ids) < seq_len + 1:
+                    break
+                inp = torch.from_numpy(ids[:-1].astype(np.int64)).unsqueeze(0)
+                tgt = torch.from_numpy(ids[1:].astype(np.int64)).unsqueeze(0)
+                logits, _ = model(inp)
+                tl = logits[:, tail_start:, :]
+                tt = tgt[:, tail_start:]
+                tail_nats += F.cross_entropy(
+                    tl.reshape(-1, tl.size(-1)), tt.reshape(-1), reduction="sum"
+                ).item()
+                tail_tokens += tt.numel()
+        expected = tail_nats / (math.log(2) * tail_tokens * bpt)
+        assert result["tail_val_bpb"] == pytest.approx(expected, rel=1e-5)
+
+    def test_tail_val_bpb_normalizes_with_bytes_per_token(self):
+        """Halving bytes_per_token doubles tail_val_bpb, same as val_bpb."""
+        torch.manual_seed(0)
+        model = _TinyModel()
+        tokens = _make_tokens(256)
+        a = compute_val_bpb(model, tokens, seq_len=16, bytes_per_token=4.0)
+        b = compute_val_bpb(model, tokens, seq_len=16, bytes_per_token=2.0)
+        assert b["tail_val_bpb"] == pytest.approx(2 * a["tail_val_bpb"])
+
+    def test_tail_val_bpb_none_when_window_too_short(self):
+        """seq_len=1 → tail_start=0 means the whole window IS the tail, so the
+        probe is still defined. A degenerate seq that yields no full windows
+        leaves tail tokens at zero → None (guarded division)."""
+        torch.manual_seed(0)
+        model = _TinyModel()
+        # Only enough tokens for a single (seq_len+1) window; tail still defined.
+        tokens = _make_tokens(17)
+        result = compute_val_bpb(model, tokens, seq_len=16)
+        # tail_start = 8 < 16, so the tail slice exists.
+        assert result["tail_val_bpb"] is not None

@@ -160,6 +160,54 @@ class BittensorChain(ChainInterface):
         _locked_append(self.chain_dir / "handshakes.jsonl", json.dumps(entry) + "\n")
         return nonce
 
+    def commit_audit_root(self, sha256_hex: str) -> int:
+        """Anchor a per-epoch audit-report hash on-chain (validation-v2 Phase 1).
+
+        Commits the 64-char hex sha256 of the canonical report_json via the
+        same `subtensor.set_commitment` path the handshake uses (the proven
+        method on bittensor 10.x; `subtensor.commit` does NOT exist). The
+        commitment overwrites each epoch, so auditors read it from an archive
+        subtensor at the historical block.
+
+        Mirrors `request_handshake_nonce`'s error discipline: RAISE on any
+        failure (SDK drift, rate limit, RPC down) so the caller surfaces it —
+        never silently lose a commit. The caller in service.run_epoch wraps
+        this in try/except so a commit failure can't break weight-setting.
+
+        Returns the block height the commitment landed at.
+        """
+        sha = sha256_hex.lower()
+        if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+            raise ValueError(
+                f"commit_audit_root expects 64-hex sha256, got {sha256_hex!r}"
+            )
+        try:
+            self.subtensor.set_commitment(
+                wallet=self.wallet,
+                netuid=self.netuid,
+                data=sha,
+            )
+            print(f"[chain] audit root committed on-chain: {sha[:16]}...")
+        except AttributeError:
+            raise RuntimeError(
+                "bittensor SDK has no set_commitment method. "
+                "Expected method on bittensor>=10.0. Got attrs containing "
+                f"'commit': {[a for a in dir(self.subtensor) if 'commit' in a.lower()][:5]}"
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"on-chain audit-root commit failed: {type(e).__name__}: {e}"
+            )
+
+        block = self._current_block()
+        self.append_event({
+            "type": "audit_root_committed",
+            "timestamp": time.time(),
+            "report_sha256": sha,
+            "block": block,
+        })
+        return block
+
     def lookup_handshake(self, nonce: str) -> Optional[HandshakeRecord]:
         path = self.chain_dir / "handshakes.jsonl"
         if not path.exists():

@@ -323,6 +323,13 @@ def score_and_decide(
         "bundle_hash": result.bundle_hash,
         "val_bpb": result.hidden_eval.val_bpb,
         "benchmark_accuracy": result.hidden_eval.benchmark_accuracy,
+        # validation-v2 Phase 1 audit-reproducibility fields, surfaced from the
+        # hidden-eval result so the per-epoch audit report can pin the exact
+        # eval an auditor must reproduce. tail_val_bpb is recorded only — the
+        # scorer does not consume it yet.
+        "val_seq_len": result.hidden_eval.val_seq_len,
+        "sealed_stream_manifest_hash": result.hidden_eval.sealed_stream_manifest_hash,
+        "tail_val_bpb": result.hidden_eval.tail_val_bpb,
         "quality_gain": score.quality_gain,
         "score": score.score,
         "tier": score.tier,
@@ -418,6 +425,9 @@ def run_epoch(
     hf_token: str | None = None,
     hf_limit: int = 10,
     audit_random_rate: float = 0.10,
+    audit_reports_enabled: bool = True,
+    netuid: int = 40,
+    eval_seed: int = 0,
 ) -> dict:
     """Process all pending submissions in one epoch.
 
@@ -459,11 +469,23 @@ def run_epoch(
     log_info(f"found {len(bundles)} pending submission(s)")
     epoch_results = {"submissions": len(bundles), "accepted": 0, "rejected": 0}
 
+    # Block height at epoch start — recorded into the audit report's block
+    # range. Best-effort; never fatal.
+    try:
+        epoch_start_block = chain.get_current_block()
+    except Exception:
+        epoch_start_block = 0
+
     # Track classifications per-hotkey so the pool split at end of epoch is
     # correct (and so two king_changes in one epoch — rare but legal —
     # don't double-share the king pool).
     king_change_hotkey: str | None = None
     meaningful_failure_hotkeys: list[str] = []
+    # Accumulate every scored (non-rejected) submission's result dict for the
+    # end-of-epoch audit report (validation-v2 Phase 1). Strictly additive —
+    # this list is only consumed by the audit-report block, which is wrapped
+    # in try/except so it can never affect scoring or weight-setting.
+    scored_results: list[dict] = []
     # Audit dispatcher needs chain_dir to enqueue jobs. Both BittensorChain
     # and LocalChain expose .chain_dir.
     chain_dir = getattr(chain, "chain_dir", None)
@@ -556,6 +578,31 @@ def run_epoch(
             "decisive": result["decisive"],
             "accepted": result["accepted"],
         })
+
+        # Accumulate a JSON-safe view of this scored submission for the
+        # end-of-epoch audit report. We strip the non-serializable `result`
+        # (ValidatorResult) and `score_report` (ScoreReport) objects and pull
+        # the lineage/attestation fields the report wants off the underlying
+        # ValidatorResult before discarding it.
+        try:
+            vr = result.get("result")
+            parent_hash = None
+            attestation_hash = None
+            if vr is not None:
+                ops = getattr(vr, "operations", {}) or {}
+                # parent lineage hash is carried in the submission_received
+                # preflight; the ValidatorResult doesn't surface it directly,
+                # so leave None unless a future scorer threads it through.
+                attestation_hash = (ops.get("op2_attestation") or {}).get("attestation_hash")
+            scored_view = {
+                k: v for k, v in result.items()
+                if k not in ("result", "score_report")
+            }
+            scored_view.setdefault("parent_king_attestation_hash", parent_hash)
+            scored_view.setdefault("attestation_hash", attestation_hash)
+            scored_results.append(scored_view)
+        except Exception as e:  # never let report bookkeeping affect scoring
+            log_debug(f"audit-report accumulation skipped for {bundle_id}: {e}")
 
         # Meaningful-failure branch: didn't crown a new king, but the work was
         # informative. Track for the 90/10 pool split; archive the bundle.
@@ -797,6 +844,12 @@ def run_epoch(
     for hk, w in recovered.items():
         round_scores[hk] = max(round_scores.get(hk, 0.0), w)
 
+    # weights_set records whether the weight extrinsic actually landed this
+    # epoch. It is INDEPENDENT of whether we build the audit report: the report
+    # documents what the validator DECIDED (round_scores), and set_weights can
+    # return early on rate-limit. We capture the bool here and stamp it into the
+    # report envelope so an auditor can see decision-vs-landed separately.
+    weights_set = False
     if round_scores:
         # Persist BEFORE attempting set_weights so a crash / rate-limit
         # mid-flight doesn't lose this epoch's credits.
@@ -804,6 +857,7 @@ def run_epoch(
         log_info(f"setting weights for {len(round_scores)} miners (split: king 90% / mf 10%)...")
         ok = chain.set_weights(round_scores)
         if ok:
+            weights_set = True
             _clear_pending_weights(chain)
         else:
             log_warn(
@@ -811,7 +865,122 @@ def run_epoch(
                 "next-epoch retry. No credit was lost."
             )
 
+    # validation-v2 Phase 1: owner-validator audit report + on-chain anchor.
+    # Build report_json from this epoch's scored results, hash + sign, anchor
+    # the hash on-chain, and write the signed envelope locally.
+    #
+    # ORDERING (the fix): this block runs UNCONDITIONALLY after round_scores /
+    # weight_snapshot are computed, regardless of whether set_weights() above
+    # succeeded or rate-limited. A rate-limited epoch still produces a full
+    # audit report (the validator's DECISION is what auditors replay; whether
+    # the extrinsic landed is recorded separately via weights_set). set_weights
+    # has no early-return that can reach here — we never return between the
+    # weight block and this block.
+    #
+    # CRITICAL: the entire block is wrapped in try/except — an audit-report
+    # failure (commit rate-limit, signing error, disk full, ...) must NEVER
+    # break scoring or weight-setting, both of which have already completed
+    # above. We log and continue. Gated behind `audit_reports_enabled`.
+    if audit_reports_enabled and scored_results:
+        try:
+            _generate_audit_report(
+                chain,
+                scored_results=scored_results,
+                weight_snapshot=round_scores,
+                epoch_start_block=epoch_start_block,
+                netuid=netuid,
+                eval_seed=eval_seed,
+                weights_set=weights_set,
+            )
+        except Exception as e:
+            log_warn(f"audit-report generation failed (scoring/weights unaffected): {e}")
+            log_debug(traceback.format_exc())
+
     return epoch_results
+
+
+def _generate_audit_report(
+    chain,
+    *,
+    scored_results: list[dict],
+    weight_snapshot: dict[str, float],
+    epoch_start_block: int,
+    netuid: int,
+    eval_seed: int,
+    weights_set: bool = False,
+) -> None:
+    """Build, hash, sign, on-chain-anchor, and persist the per-epoch audit
+    report (validation-v2 Phase 1).
+
+    Order (per the design's audit-anchor section): hash + sign the canonical
+    report, anchor the hash on-chain BEFORE serving the report, record the
+    commitment block into the envelope, then write the signed envelope locally.
+
+    `weights_set` records whether the weight extrinsic landed this epoch; it is
+    stamped into the envelope (NOT the signed report_json) so the report stays a
+    pure record of the validator's decision while auditors can still see whether
+    the on-chain weights matched it.
+
+    Raises on any failure — the single caller wraps this in try/except so a
+    failure here can't affect the already-completed scoring/weight-setting.
+    """
+    from validator.audit_report import (
+        build_envelope,
+        build_report_json,
+        canonical_json,
+        report_sha256,
+        sign_report,
+    )
+
+    end_block = chain.get_current_block()
+    epoch_id = f"{netuid}-{end_block}"
+    generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    report_json = build_report_json(
+        epoch_id=epoch_id,
+        netuid=netuid,
+        start_block=epoch_start_block,
+        end_block=end_block,
+        generated_at=generated_at,
+        scored=scored_results,
+        weight_snapshot=weight_snapshot,
+        seed=eval_seed,
+    )
+
+    sha = report_sha256(report_json)
+
+    # Sign with the validator hotkey Keypair when available (BittensorChain).
+    # LocalChain has no wallet → signature is empty (local-write parity).
+    signature = ""
+    signer_hotkey = ""
+    wallet = getattr(chain, "wallet", None)
+    if wallet is not None:
+        try:
+            keypair = wallet.hotkey
+            signature = sign_report(canonical_json(report_json), keypair)
+            signer_hotkey = keypair.ss58_address
+        except Exception as e:
+            log_warn(f"audit-report signing failed (continuing unsigned): {e}")
+
+    # Anchor on-chain BEFORE writing/serving the report (design: the commitment
+    # is the trust anchor). commit_audit_root raises on failure.
+    commitment_block = chain.commit_audit_root(sha)
+
+    envelope = build_envelope(
+        report_json,
+        signature=signature,
+        signer_hotkey=signer_hotkey,
+        chain_commitment_block=commitment_block,
+        weights_set=weights_set,
+    )
+
+    from validator.audit_report import write_report
+    out_dir = getattr(chain, "chain_dir", None) or RALPH_ROOT
+    report_path = write_report(envelope, Path(out_dir))
+    log_info(
+        f"audit report committed: epoch={epoch_id} sha={sha[:16]}... "
+        f"block={commitment_block} ({len(scored_results)} submissions) -> {report_path}"
+    )
 
 
 def main():

@@ -114,6 +114,21 @@ class ChainInterface(ABC):
         Raises ValueError if `block` is negative or exceeds the current height.
         """
 
+    def commit_audit_root(self, sha256_hex: str) -> int:
+        """Anchor a per-epoch audit-report hash on-chain (validation-v2 Phase 1).
+
+        `sha256_hex` is the 64-char lowercase hex sha256 of the canonical
+        report_json. Backends MUST raise on failure (do NOT swallow) so an
+        audit-report block that can't anchor surfaces loudly to the caller,
+        which then logs-and-continues without breaking weight-setting.
+
+        Returns the block height the commitment landed at.
+
+        Default no-op for backends that don't anchor (returns the current
+        block) so the interface stays incrementally adoptable.
+        """
+        return self.get_current_block()
+
     def blacklist(self, hotkey: str, reason: str = "") -> None:
         """Mark a miner-hotkey as blacklisted. Subsequent set_weights MUST
         zero its weight regardless of round_scores. Default no-op so

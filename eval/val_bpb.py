@@ -75,6 +75,14 @@ def compute_val_bpb(
     model.eval()
     total_nats = 0.0
     total_tokens = 0
+    # Long-context tail probe (mirrors recipe/train.py's tail_val_bpb): the SAME
+    # cross-entropy, normalized by the SAME bytes_per_token, but accumulated only
+    # over the tail positions [seq_len//2 :] of each window. Penalizes recipes
+    # that shorten effective training context (the 250M-transfer blind spot).
+    # Recorded only — not yet consumed by the scorer.
+    tail_start = seq_len // 2
+    tail_nats = 0.0
+    tail_tokens = 0
 
     # Pack into non-overlapping windows of (seq_len + 1).
     n = len(eval_tokens)
@@ -101,14 +109,31 @@ def compute_val_bpb(
                 )
                 total_nats += loss_sum.item()
                 total_tokens += tgt.numel()
+                # Tail slice: positions [tail_start:] along the sequence axis.
+                # logits/tgt are (batch, seq_len, vocab) / (batch, seq_len).
+                if tail_start < tgt.size(1):
+                    tail_logits = logits[:, tail_start:, :]
+                    tail_tgt = tgt[:, tail_start:]
+                    tail_loss_sum = F.cross_entropy(
+                        tail_logits.reshape(-1, tail_logits.size(-1)),
+                        tail_tgt.reshape(-1),
+                        reduction="sum",
+                    )
+                    tail_nats += tail_loss_sum.item()
+                    tail_tokens += tail_tgt.numel()
                 batch_inp.clear()
                 batch_tgt.clear()
 
     total_bytes = total_tokens * bytes_per_token
     bpb = total_nats / (math.log(2) * total_bytes) if total_bytes > 0 else float("inf")
     nll_per_token = total_nats / max(total_tokens, 1)
+    tail_bytes = tail_tokens * bytes_per_token
+    tail_bpb = (
+        tail_nats / (math.log(2) * tail_bytes) if tail_bytes > 0 else None
+    )
     return {
         "val_bpb": bpb,
+        "tail_val_bpb": tail_bpb,
         "nll_per_token": nll_per_token,
         "tokens_evaluated": total_tokens,
         "bytes_per_token": bytes_per_token,

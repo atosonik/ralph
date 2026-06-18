@@ -52,19 +52,34 @@ class HiddenEvalResult:
     # B1-D12 forward-compat slot. When set, the v0.11+ chain consumer
     # reads the Cross-Scale Downstream Pareto verdict via this field.
     downstream: DownstreamReport | None = None
+    # validation-v2 Phase 1 audit-reproducibility slots. These let an auditor
+    # re-run the exact eval the validator scored against:
+    #   val_seq_len                 — context length the hidden-eval used
+    #   sealed_stream_manifest_hash — content hash identifying the sealed eval set
+    #   tail_val_bpb                — long-context tail probe (BPB over the
+    #                                 positions [val_seq_len//2 :]); recorded only,
+    #                                 the scorer does not consume it yet.
+    # All default None so old serialized dicts deserialize cleanly and the
+    # legacy-dict contract (below) stays byte-stable when they're unset.
+    val_seq_len: int | None = None
+    sealed_stream_manifest_hash: str | None = None
+    tail_val_bpb: float | None = None
 
     def to_legacy_dict(self) -> dict:
-        """Serialize, omitting `downstream` when it's None.
+        """Serialize, omitting forward-compat slots when they're None.
 
-        When `downstream is None` (the common case during the v0.10 →
-        v0.11 transition), the output is byte-identical to the
-        pre-v0.11 `dataclasses.asdict(self)` shape. When `downstream`
-        is populated, it's included as a nested dict (consumers that
-        don't know about it simply ignore the extra key).
+        When the optional forward-compat slots (`downstream`, `val_seq_len`,
+        `sealed_stream_manifest_hash`, `tail_val_bpb`) are all None — the common
+        case during the transition — the output is byte-identical to the
+        pre-v0.11 `dataclasses.asdict(self)` shape, preserving the B1-D12
+        contract for old chain consumers. When any is populated it's included
+        (consumers that don't know about it simply ignore the extra key).
         """
         d = asdict(self)
-        if d.get("downstream") is None:
-            d.pop("downstream", None)
+        for k in ("downstream", "val_seq_len", "sealed_stream_manifest_hash",
+                  "tail_val_bpb"):
+            if d.get(k) is None:
+                d.pop(k, None)
         return d
 
 
@@ -72,6 +87,34 @@ def _stable_hash(obj) -> str:
     import hashlib
     payload = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _sealed_stream_manifest_hash(
+    tokens_path: Path,
+    eval_tokens: np.ndarray,
+    examples: list,
+) -> str:
+    """Stable content hash identifying the EXACT sealed eval set the validator
+    scored against — the audit-reproducibility anchor (validation-v2 Phase 1).
+
+    An auditor re-running the eval needs to confirm it scored against the same
+    held-out data. We hash the full sealed token stream (the bytes on disk when
+    available, else the synthesized fallback stream) together with the benchmark
+    mix. Computed over the FULL content — not a 100-token prefix — so it pins
+    the whole sealed stream, not just its head.
+    """
+    import hashlib
+
+    if tokens_path.exists():
+        tokens_digest = hashlib.sha256(tokens_path.read_bytes()).hexdigest()
+    else:
+        tokens_digest = hashlib.sha256(
+            np.ascontiguousarray(eval_tokens).tobytes()
+        ).hexdigest()
+    return _stable_hash({
+        "tokens_sha256": tokens_digest,
+        "benchmark_sha256": _stable_hash(examples),
+    })
 
 
 def run_hidden_eval(
@@ -110,10 +153,18 @@ def run_hidden_eval(
         "benchmark_sha256": _stable_hash(examples),
     })
 
+    # Audit-reproducibility anchors (validation-v2 Phase 1).
+    sealed_manifest_hash = _sealed_stream_manifest_hash(
+        tokens_path, np.asarray(eval_tokens), examples
+    )
+
     return HiddenEvalResult(
         val_bpb=bpb_result["val_bpb"],
         benchmark_accuracy=bench_result["benchmark_accuracy"],
         tokens_evaluated=bpb_result["tokens_evaluated"],
         benchmark_examples=bench_result["n_examples"],
         eval_set_hash=eval_set_hash,
+        val_seq_len=seq_len,
+        sealed_stream_manifest_hash=sealed_manifest_hash,
+        tail_val_bpb=bpb_result.get("tail_val_bpb"),
     )

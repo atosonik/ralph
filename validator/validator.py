@@ -494,6 +494,31 @@ def _patched_hidden_eval(
         if not all(k in fields for k in required):
             return False, f"patched-eval: malformed result line: {line!r}", None
 
+        # Optional audit-reproducibility fields (validation-v2 Phase 1). Older
+        # helper versions don't emit them; "none" maps to None. Parse
+        # defensively so a malformed optional field never fails the eval.
+        def _opt_float(key: str) -> float | None:
+            v = fields.get(key)
+            if v is None or v == "none":
+                return None
+            try:
+                return float(v)
+            except ValueError:
+                return None
+
+        def _opt_int(key: str) -> int | None:
+            v = fields.get(key)
+            if v is None or v == "none":
+                return None
+            try:
+                return int(v)
+            except ValueError:
+                return None
+
+        def _opt_str(key: str) -> str | None:
+            v = fields.get(key)
+            return None if (v is None or v == "none") else v
+
         try:
             result = HiddenEvalResult(
                 val_bpb=float(fields["val_bpb"]),
@@ -501,6 +526,9 @@ def _patched_hidden_eval(
                 tokens_evaluated=int(fields["tokens_evaluated"]),
                 benchmark_examples=int(fields["benchmark_examples"]),
                 eval_set_hash=fields["eval_set_hash"],
+                val_seq_len=_opt_int("val_seq_len"),
+                sealed_stream_manifest_hash=_opt_str("sealed_stream_manifest_hash"),
+                tail_val_bpb=_opt_float("tail_val_bpb"),
             )
         except ValueError as e:
             return False, f"patched-eval: result line parse error: {e}", None

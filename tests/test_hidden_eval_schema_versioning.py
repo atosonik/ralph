@@ -309,3 +309,90 @@ class TestDataclassSemantics:
         d = asdict(result)
         assert "downstream" in d
         assert d["downstream"] is None
+
+
+# ============================================================================
+# validation-v2 Phase 1 reproducibility fields
+# (val_seq_len / sealed_stream_manifest_hash / tail_val_bpb)
+# ============================================================================
+
+
+class TestReproducibilityFields:
+    def test_default_none_and_dropped_from_legacy_dict(self):
+        """Unset → all three default None AND are dropped from to_legacy_dict
+        so the pre-v0.11 byte-shape is preserved."""
+        result = HiddenEvalResult(
+            val_bpb=1.0,
+            benchmark_accuracy=0.5,
+            tokens_evaluated=1000,
+            benchmark_examples=50,
+            eval_set_hash="abc",
+        )
+        assert result.val_seq_len is None
+        assert result.sealed_stream_manifest_hash is None
+        assert result.tail_val_bpb is None
+        d = result.to_legacy_dict()
+        for k in ("val_seq_len", "sealed_stream_manifest_hash", "tail_val_bpb"):
+            assert k not in d
+        # byte-shape unchanged from legacy
+        assert set(d) == {
+            "val_bpb", "benchmark_accuracy", "tokens_evaluated",
+            "benchmark_examples", "eval_set_hash",
+        }
+
+    def test_populated_included_in_legacy_dict(self):
+        result = HiddenEvalResult(
+            val_bpb=1.0,
+            benchmark_accuracy=0.5,
+            tokens_evaluated=1000,
+            benchmark_examples=50,
+            eval_set_hash="abc",
+            val_seq_len=512,
+            sealed_stream_manifest_hash="d" * 64,
+            tail_val_bpb=1.31,
+        )
+        d = result.to_legacy_dict()
+        assert d["val_seq_len"] == 512
+        assert d["sealed_stream_manifest_hash"] == "d" * 64
+        assert d["tail_val_bpb"] == 1.31
+
+    def test_old_dict_without_new_keys_deserializes(self):
+        """A pre-Phase-1 serialized dict still round-trips via kwargs."""
+        old = {
+            "val_bpb": 1.0,
+            "benchmark_accuracy": 0.5,
+            "tokens_evaluated": 1000,
+            "benchmark_examples": 50,
+            "eval_set_hash": "abc",
+        }
+        r = HiddenEvalResult(**old)
+        assert r.val_seq_len is None
+        assert r.sealed_stream_manifest_hash is None
+        assert r.tail_val_bpb is None
+
+    def test_run_hidden_eval_surfaces_fields(self, tmp_path):
+        """End-to-end: run_hidden_eval on a tiny model populates val_seq_len,
+        sealed_stream_manifest_hash, and tail_val_bpb (Phase-0 fallback path,
+        no on-disk shard needed)."""
+        import torch
+
+        from eval.hidden_eval import run_hidden_eval
+
+        class _Tiny(torch.nn.Module):
+            def __init__(self, vocab=50257, dim=8):
+                super().__init__()
+                self.embed = torch.nn.Embedding(vocab, dim)
+                self.out = torch.nn.Linear(dim, vocab)
+
+            def forward(self, x):
+                return self.out(self.embed(x)), None
+
+        torch.manual_seed(0)
+        model = _Tiny()
+        # tmp_path has no active_tokens.bin → Phase-0 synthesized stream fires.
+        res = run_hidden_eval(model, tmp_path, seq_len=32)
+        assert res.val_seq_len == 32
+        assert isinstance(res.sealed_stream_manifest_hash, str)
+        assert len(res.sealed_stream_manifest_hash) == 64
+        assert res.tail_val_bpb is not None
+        assert res.tail_val_bpb > 0

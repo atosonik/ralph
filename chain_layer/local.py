@@ -112,6 +112,29 @@ class LocalChain(ChainInterface):
     def append_event(self, event: dict) -> None:
         _locked_append(self.chain_dir / "events.jsonl", json.dumps(event) + "\n")
 
+    def commit_audit_root(self, sha256_hex: str) -> int:
+        """File-write parity for the audit-root commitment (validation-v2 P1).
+
+        No real chain here — record the commit as an event + write a
+        last_audit_root.json so a local auditor / test can read it back.
+        Returns the (event-count) block height like get_current_block().
+        """
+        sha = sha256_hex.lower()
+        if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+            raise ValueError(
+                f"commit_audit_root expects 64-hex sha256, got {sha256_hex!r}"
+            )
+        self.append_event({
+            "type": "audit_root_committed",
+            "timestamp": time.time(),
+            "report_sha256": sha,
+        })
+        block = self.get_current_block()
+        (self.chain_dir / "last_audit_root.json").write_text(
+            json.dumps({"report_sha256": sha, "block": block}, sort_keys=True)
+        )
+        return block
+
     def blacklist(self, hotkey: str, reason: str = "") -> None:
         path = self.chain_dir / "blacklist.json"
         current = {}

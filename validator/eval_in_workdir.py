@@ -108,12 +108,19 @@ def main() -> int:
         print(f"ERROR: hidden_eval crashed: {e}", file=sys.stderr)
         return 2
 
+    # tail_val_bpb may be None (eval window too short for a tail slice); emit a
+    # sentinel the parent maps back to None rather than a bogus float.
+    tail = result.tail_val_bpb
+    tail_str = f"{tail:.6f}" if isinstance(tail, (int, float)) else "none"
     print(
         f"RALPH_EVAL_RESULT val_bpb={result.val_bpb:.6f} "
         f"benchmark_acc={result.benchmark_accuracy:.6f} "
         f"tokens_evaluated={result.tokens_evaluated} "
         f"benchmark_examples={result.benchmark_examples} "
-        f"eval_set_hash={result.eval_set_hash}"
+        f"eval_set_hash={result.eval_set_hash} "
+        f"val_seq_len={result.val_seq_len if result.val_seq_len is not None else 'none'} "
+        f"sealed_stream_manifest_hash={result.sealed_stream_manifest_hash or 'none'} "
+        f"tail_val_bpb={tail_str}"
     )
     return 0
 
