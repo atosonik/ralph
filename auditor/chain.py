@@ -1,6 +1,6 @@
 """Read the validator's on-chain audit commitment at a historical block.
 
-Mirrors greencompute-audit/audit/chain.py. The owner commits the 64-hex
+Mirrors greencompute-audit/audit/chain.py. The validator commits the 64-hex
 sha256 of the canonical report_json via `set_commitment` (see
 chain_layer/bittensor_chain.py:commit_audit_root) — that commitment is the
 trust anchor. Because each epoch's commitment OVERWRITES the previous one, the

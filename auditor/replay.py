@@ -8,7 +8,7 @@ Gate 3 (diff.py) compares it against the validator's claimed
   * `_apply_pool_split`  -> the §5.6 90/10 king/meaningful-failure pool split
 
 THE FIDELITY GUARANTEE: every weight/floor constant used here is IMPORTED from
-validator.service — NOT copied. If the owner unilaterally changes
+validator.service — NOT copied. If a validator unilaterally changes
 KING_CHANGE_WEIGHT, the pool fractions, or the 2x noise-floor multiplier, the
 auditor's replay shifts in lockstep with the validator code in the SAME repo,
 so a divergence between the published weights and this replay (Gate 3) is a real
@@ -38,7 +38,7 @@ weight) and reproduces `_apply_pool_split` exactly; the meaningful_failure set
 (which only divides the 10% pool) is taken from the published per-submission
 gate, because its bars 1/3/5 require data only a Gate-4 re-run (sampled bundle
 fetch) can supply. Those bars are explicitly Phase-3 territory — see
-docs/rearch_2026_06/childkey_owner_auditor_architecture.md (Gate 4).
+docs/rearch_2026_06/childkey_validator_auditor_architecture.md (Gate 4).
 """
 
 from __future__ import annotations

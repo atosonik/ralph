@@ -2,10 +2,10 @@
 
 When AUDITOR_SET_WEIGHTS_ENABLED is set, a registered auditor-validator sets its
 OWN weights on netuid 40 from the independently-replayed scores, shadowing a
-dishonest owner. Port of greencompute-audit/audit/weights.py, adapted to the
+dishonest validator. Port of greencompute-audit/audit/weights.py, adapted to the
 Ralph `bittensor` SDK (a Ralph dependency) instead of legacy substrate-interface.
 
-KEY SECURITY PROPERTY — the auditor uses ITS OWN wallet, never the owner's:
+KEY SECURITY PROPERTY — the auditor uses ITS OWN wallet, never the scored validator's:
   * You pass wallet IDENTIFIERS (coldkey/hotkey NAMES) via env vars, never the
     secret material. The bittensor wallet on disk is read at runtime.
   * Names-in-env: AUDITOR_WALLET_NAME / AUDITOR_WALLET_HOTKEY.

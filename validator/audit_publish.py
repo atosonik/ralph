@@ -1,4 +1,4 @@
-"""Publish owner-validator audit reports to a HuggingFace dataset repo.
+"""Publish Ralph validator audit reports to a HuggingFace dataset repo.
 
 validation-v2 Phase 2 (A). The on-chain `set_commitment` remains the trust
 anchor; HF is just the off-chain store auditors pull the full signed report

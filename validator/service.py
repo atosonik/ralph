@@ -869,7 +869,7 @@ def run_epoch(
                 "next-epoch retry. No credit was lost."
             )
 
-    # validation-v2 Phase 1: owner-validator audit report + on-chain anchor.
+    # validation-v2 Phase 1: validator audit report + on-chain anchor.
     # Build report_json from this epoch's scored results, hash + sign, anchor
     # the hash on-chain, and write the signed envelope locally.
     #

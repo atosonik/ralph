@@ -1,4 +1,4 @@
-"""Fetch audit reports from the owner's HF dataset repo.
+"""Fetch audit reports from a validator's HF dataset repo.
 
 Mirrors greencompute-audit/audit/fetch.py, but Ralph publishes to a HuggingFace
 **dataset** repo instead of running a FastAPI server. We pull plain JSON over
@@ -20,7 +20,7 @@ _REPO_SUBDIR = "audit_reports"
 
 
 class ReportClient:
-    """HTTP client for the owner's published audit reports on HF."""
+    """HTTP client for a validator's published audit reports on HF."""
 
     def __init__(
         self,

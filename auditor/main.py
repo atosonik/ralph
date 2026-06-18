@@ -1,6 +1,6 @@
 """Ralph auditor CLI — independent CPU-only verifier for subnet 40.
 
-Per epoch it runs three gates against the owner's published audit report:
+Per epoch it runs three gates against a validator's published audit report:
 
   Gate 1 (verify.py): recompute sha256(canonical_json(report_json)) and assert
       it equals the envelope hash AND the on-chain commitment at epoch_end_block,
@@ -199,7 +199,7 @@ def audit_new_epochs(chain: ChainClient, api: ReportClient) -> int:
         "Ralph auditor — independent CPU-only verifier for subnet 40.\n\n"
         "Runs Gate 1 (hash + on-chain commitment + signature), Gate 2 (weight "
         "replay from published data), and Gate 3 (weight diff, tol 1e-4) against "
-        "the owner's published audit reports.\n\n"
+        "a validator's published audit reports.\n\n"
         "Exit codes: 0 clean, 1 hash-or-sig fail, 2 math diverge, 3 network.\n\n"
         "Needs an ARCHIVE subtensor (SUBTENSOR_URL) because each epoch's "
         "commitment overwrites the last."

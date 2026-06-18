@@ -1,6 +1,6 @@
 """Ralph auditor — independent CPU-only verifier for subnet 40 (Ralph).
 
-Anyone can run this against the owner-validator's published audit reports to
+Anyone can run this against a validator's published audit reports to
 prove, on-chain, whether a validator scored honestly — WITHOUT re-doing any GPU
 work. Gates 1-3 (hash+sig, scoring replay, weight diff) are pure CPU.
 

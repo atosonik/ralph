@@ -1,7 +1,7 @@
 # Ralph auditor
 
 Independent, **CPU-only** verifier for Ralph (Bittensor subnet 40). Anyone can
-run it to prove — on-chain — whether the owner-validator scored an epoch
+run it to prove — on-chain — whether a validator scored an epoch
 honestly, **without re-doing any GPU work**.
 
 Each epoch it runs three gates against the validator's published audit report:
@@ -58,5 +58,5 @@ will not have the state at `epoch_end_block`.
 Set `AUDITOR_SET_WEIGHTS_ENABLED=1` and provide your OWN wallet by name
 (`AUDITOR_WALLET_NAME`, `AUDITOR_WALLET_HOTKEY`) to have a registered
 auditor-validator set its own weights from the replayed scores, shadowing a
-dishonest owner. Names-in-env only — never the owner's wallet, never the secret
+dishonest validator. Names-in-env only — never the scored validator's wallet, never the secret
 material.

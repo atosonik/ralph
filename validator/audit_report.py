@@ -1,4 +1,4 @@
-"""Owner-validator audit report — validation-v2 Phase 1.
+"""Ralph validator audit report — validation-v2 Phase 1.
 
 Ralph validators run the GPU hidden-eval scoring and set weights; this module
 anchors a per-epoch **audit commitment** on-chain so anyone can re-derive a
@@ -21,7 +21,7 @@ This module builds that per-epoch report:
 
 A scoring validator cannot lie two ways: (a) commit a hash != raw report -> caught by
 re-hash; (b) commit a report whose weights != scorer(raw data) -> caught by
-replay. See docs/rearch_2026_06/childkey_owner_auditor_architecture.md.
+replay. See docs/rearch_2026_06/childkey_validator_auditor_architecture.md.
 
 Design note — field availability: the three Gate-4 reproducibility fields
 (`val_seq_len`, `sealed_stream_manifest_hash`, `tail_val_bpb`) are now populated
