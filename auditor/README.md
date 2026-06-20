@@ -15,13 +15,22 @@ Each epoch it runs three gates against the validator's published audit report:
   unilateral validator change makes the auditor diverge — an intended alarm).
 - **Gate 3 — diff.** Diff replayed vs claimed weights (tolerance `1e-4`).
 
-Exit codes: `0` clean · `1` hash-or-signature fail · `2` math diverge · `3` network.
+Exit codes: `0` clean · `1` hash-or-signature fail · `2` math diverge · `3` network · `4` eval diverged (Gate 4).
 
-A re-run of the GPU eval itself (Gate 4) is **not** part of this CPU tool — it's
-Phase 3 and needs a GPU. The diff-non-trivial and rationale-coherent
-classification bars need the raw bundle and are likewise Gate-4 territory; the
-replay trusts the published classification for those and notes it in
-`replay.py`.
+**Gate 4 — GPU re-eval (Phase 3, in progress).** Gates 1-3 trust the published
+`val_bpb` — the one number a GPU produced. Gate 4 re-runs that eval on the sealed
+stream the validator committed to and asserts the recomputed `val_bpb` matches the
+claim (same checkpoint + same stream → deterministic modulo cross-GPU FP drift, far
+below the 0.0064 noise floor). It is **tiered** so the expensive re-run focuses where
+weight rides on it: king-change candidates (the 90-100% share) get a full re-eval,
+meaningful-failures a cheap sampled pass, plain-failures none. The decision spine
+(tiering, sampling, tolerance, verdict) lives in `auditor/gate4.py` and is CPU-only
+/ torch-free at import; the actual re-eval imports the validator's own
+`eval.val_bpb.compute_val_bpb` lazily and needs a GPU. Still to land: wiring it into
+the `python -m auditor` loop, bundle fetch + manifest-hash verification, and
+**calibrating the tolerance against measured cross-GPU drift**. The diff-non-trivial
+and rationale-coherent classification bars likewise need the raw bundle (Gate-4
+territory); the replay trusts the published classification for those (see `replay.py`).
 
 ## Install (CPU-only, ~50 MB RAM)
 
