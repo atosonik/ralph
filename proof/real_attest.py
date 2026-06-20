@@ -418,6 +418,24 @@ def verify_tdx_quote(quote_hex: str, expected_nonce: str, expected_measurement: 
     )
 
 
+def _required_attest_level() -> str:
+    """Minimum hardware level the subnet gates miners to
+    (env RALPH_REQUIRE_ATTEST_LEVEL):
+
+      * "tdx_nvcc" (default) — Intel TDX (TEE) **and** NVIDIA CC GPU, both
+        required and verified. This is the "miners may only run in a TEE+CC
+        enclave" gate.
+      * "nvcc_only"          — NVIDIA CC GPU required; TDX optional. Relaxation
+        for testnet / CC-GPU-without-TDX hosts.
+
+    Unknown values fall back to the strict default.
+    """
+    import os as _os
+
+    lvl = _os.environ.get("RALPH_REQUIRE_ATTEST_LEVEL", "tdx_nvcc").strip().lower()
+    return lvl if lvl in {"tdx_nvcc", "nvcc_only"} else "tdx_nvcc"
+
+
 def verify_attestation(
     att: RealAttestation,
     expected_container_measurement: str,
@@ -463,19 +481,42 @@ def verify_attestation(
             errors.extend(mock_errors)
         return len(errors) == 0, errors
 
-    # Real attestation verification
+    # Real attestation verification — REQUIRE the TEE/CC evidence the subnet
+    # gates on. Previously the TDX/GPU quotes were verified only "if present",
+    # so a real_* attestation with EMPTY quotes passed on measurement+nonce
+    # +bundle alone (all miner-derivable) — bypassing the hardware proof. We now
+    # require the evidence for the configured level and verify it.
+    required = _required_attest_level()
+    require_tdx = required == "tdx_nvcc"
+    if require_tdx and att.attestation_type != "real_tdx_nvcc":
+        errors.append(
+            f"attestation_type={att.attestation_type!r} below required level "
+            "'tdx_nvcc' (TEE+CC); set RALPH_REQUIRE_ATTEST_LEVEL=nvcc_only to "
+            "relax (testnet only)"
+        )
+
     for i, ep in enumerate(att.epochs):
         if ep.nonce != att.handshake_nonce:
             errors.append(f"epoch {i}: nonce drift")
         if ep.container_measurement != att.container_measurement:
             errors.append(f"epoch {i}: container measurement drift")
 
-        if ep.gpu_token:
+        # NVIDIA CC GPU token — REQUIRED for every real attestation.
+        if not ep.gpu_token:
+            errors.append(f"epoch {i}: missing NVIDIA CC GPU attestation token (required)")
+        else:
             ok, detail = verify_gpu_token(ep.gpu_token, expected_handshake_nonce)
             if not ok:
                 errors.append(f"epoch {i}: {detail}")
 
-        if ep.tdx_quote:
+        # Intel TDX (TEE) quote — REQUIRED at level tdx_nvcc; verified if present
+        # at nvcc_only.
+        if not ep.tdx_quote:
+            if require_tdx:
+                errors.append(
+                    f"epoch {i}: missing Intel TDX (TEE) quote (required at level tdx_nvcc)"
+                )
+        else:
             ok, detail = verify_tdx_quote(
                 ep.tdx_quote, expected_handshake_nonce,
                 expected_container_measurement,

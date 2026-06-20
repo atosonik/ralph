@@ -303,6 +303,11 @@ def op2_attestation_verify(
     on mainnet. Testnet operators can set RALPH_ALLOW_MOCK_ATTESTATION=1 to
     accept mocks (with a loud warning).
 
+    A real attestation must CARRY the TEE/CC hardware evidence its level demands
+    (verify_attestation no longer accepts empty quotes): RALPH_REQUIRE_ATTEST_LEVEL
+    defaults to "tdx_nvcc" (Intel TDX + NVIDIA CC, both required); set it to
+    "nvcc_only" to relax to CC-GPU-without-TDX on testnet.
+
     See deep_review_2026-05-31 critical #3/#4/#5.
     """
     import os as _os
