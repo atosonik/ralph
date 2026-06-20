@@ -83,6 +83,31 @@ class ChainClient:
         decoded = _decode_commitment(raw)
         return _normalize_hex(decoded) if decoded else None
 
+    def get_current_block(self) -> int:
+        """Current chain-head block (drives the counter-weight cadence)."""
+        return int(self._connect().get_current_block())
+
+    def blocks_since_weight_set(self, hotkey: str) -> int | None:
+        """How many blocks since `hotkey` last set weights on this netuid.
+
+        Resolves hotkey -> uid -> `blocks_since_last_update` (= current_block -
+        LastUpdate[uid]). Returns None if the hotkey isn't registered or the
+        query fails — the caller treats None as "due / unknown" so a brand-new
+        (never-set) auditor sets weights on its first cadence tick.
+        """
+        sub = self._connect()
+        try:
+            uid = sub.get_uid_for_hotkey_on_subnet(hotkey, self.netuid)
+        except Exception:
+            return None
+        if uid is None:
+            return None
+        try:
+            blocks = sub.blocks_since_last_update(self.netuid, int(uid))
+        except Exception:
+            return None
+        return None if blocks is None else int(blocks)
+
     def close(self) -> None:
         sub = self._subtensor
         if sub is not None:

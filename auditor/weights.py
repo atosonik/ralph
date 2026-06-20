@@ -23,6 +23,12 @@ import os
 logger = logging.getLogger("ralph-auditor.weights")
 
 
+# Counter-weight cadence: a validator must keep setting weights every epoch or
+# its weights go stale and vTrust decays. The subnet enforces a minimum gap
+# (weights_rate_limit ≈ 100 blocks on netuid 40); we default comfortably above it.
+DEFAULT_WEIGHT_SET_INTERVAL_BLOCKS = 300  # ≈ 1h at 12s/block
+
+
 def is_enabled() -> bool:
     return os.environ.get("AUDITOR_SET_WEIGHTS_ENABLED", "false").strip().lower() in {
         "1",
@@ -30,6 +36,47 @@ def is_enabled() -> bool:
         "yes",
         "on",
     }
+
+
+def weight_set_interval_blocks() -> int:
+    """Blocks between counter-weight sets (env AUDITOR_WEIGHT_INTERVAL_BLOCKS,
+    default 300). Invalid/non-positive values fall back to the default."""
+    raw = os.environ.get("AUDITOR_WEIGHT_INTERVAL_BLOCKS", "").strip()
+    if raw:
+        try:
+            v = int(raw)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return DEFAULT_WEIGHT_SET_INTERVAL_BLOCKS
+
+
+def is_weight_set_due(blocks_since: int | None, interval_blocks: int) -> bool:
+    """True if the auditor should (re)set weights now.
+
+    `blocks_since` is blocks elapsed since the auditor's hotkey last set weights
+    (None = never set / unknown → due). Due once at least `interval_blocks` have
+    elapsed. This is what makes counter-weighting a continuous epoch-cadence
+    process rather than a one-shot.
+    """
+    if interval_blocks <= 0:
+        raise ValueError(f"interval_blocks must be > 0; got {interval_blocks}")
+    if blocks_since is None:
+        return True
+    return blocks_since >= interval_blocks
+
+
+def auditor_hotkey_ss58() -> str | None:
+    """The auditor's OWN hotkey ss58, read-only, for cadence queries
+    (blocks-since-last-weight-set). None if no wallet is configured."""
+    wallet = _load_wallet()
+    if wallet is None:
+        return None
+    try:
+        return wallet.hotkey.ss58_address
+    except Exception:
+        return None
 
 
 def _load_wallet():
@@ -133,4 +180,11 @@ def submit_weights(
             pass
 
 
-__all__ = ["is_enabled", "submit_weights"]
+__all__ = [
+    "DEFAULT_WEIGHT_SET_INTERVAL_BLOCKS",
+    "auditor_hotkey_ss58",
+    "is_enabled",
+    "is_weight_set_due",
+    "submit_weights",
+    "weight_set_interval_blocks",
+]

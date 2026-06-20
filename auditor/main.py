@@ -27,6 +27,12 @@ Env:
     HF_TOKEN              only for a private report repo (public needs none)
     AUDIT_INTERVAL_SECONDS  --loop sleep (default 300)
     AUDITOR_SET_WEIGHTS_ENABLED  opt-in counter-weight (default off)
+    AUDITOR_WEIGHT_INTERVAL_BLOCKS  re-set weights every N blocks (default 300)
+
+Counter-weight (when enabled) runs on a BLOCK cadence, not per-report: each pass
+reads how many blocks since the auditor's hotkey last set weights and re-sets
+from the latest clean epoch's replayed scores once ~300 blocks have elapsed, so
+the auditor-validator keeps its weights (and vTrust) fresh every epoch.
 """
 
 from __future__ import annotations
@@ -60,6 +66,7 @@ EXIT_NETWORK = 3
 
 STATE_FILE = Path(".audit_state")
 PUBLISHED_FILE = Path(".audit_published")
+LAST_CLEAN_EPOCH_FILE = Path(".audit_last_clean_epoch")  # epoch_id of the most recent clean epoch
 
 
 def _read_int_file(path: Path) -> int | None:
@@ -73,6 +80,13 @@ def _read_int_file(path: Path) -> int | None:
 
 def _write_int_file(path: Path, value: int) -> None:
     path.write_text(str(value))
+
+
+def _read_str_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    val = path.read_text().strip()
+    return val or None
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -145,13 +159,12 @@ def audit_epoch(epoch_id: str, chain: ChainClient, api: ReportClient) -> int:
 def audit_new_epochs(chain: ChainClient, api: ReportClient) -> int:
     """Audit every epoch newer than the local watermark. Returns the worst code.
 
-    On a clean epoch the `.audit_state` watermark advances. If
-    AUDITOR_SET_WEIGHTS_ENABLED, also counter-weights from the most recent clean
-    epoch's replayed scores using the auditor's OWN wallet.
+    On a clean epoch the `.audit_state` watermark advances and the epoch_id is
+    recorded as the latest-clean epoch (consumed by `maybe_counter_weight`).
+    Weight-setting is decoupled from this pass — it runs on a block cadence (see
+    `maybe_counter_weight`) so the auditor keeps setting weights every epoch even
+    when no new report dropped this cycle.
     """
-    from auditor.weights import is_enabled as cw_enabled
-    from auditor.weights import submit_weights
-
     last_audited = _read_int_file(STATE_FILE)
     try:
         reports = api.list_reports()
@@ -161,8 +174,6 @@ def audit_new_epochs(chain: ChainClient, api: ReportClient) -> int:
 
     sorted_reports = sorted(reports, key=lambda r: r.get("epoch_end_block") or 0)
     worst = EXIT_CLEAN
-    last_clean_epoch_id: str | None = None
-    last_clean_end_block: int | None = None
 
     for r in sorted_reports:
         end_block = r.get("epoch_end_block")
@@ -172,24 +183,74 @@ def audit_new_epochs(chain: ChainClient, api: ReportClient) -> int:
         worst = max(worst, code)
         if code == EXIT_CLEAN and end_block is not None:
             _write_int_file(STATE_FILE, end_block)
-            last_clean_epoch_id = r["epoch_id"]
-            last_clean_end_block = end_block
-
-    if last_clean_epoch_id and cw_enabled():
-        try:
-            envelope = api.get_report(last_clean_epoch_id)
-            replayed = replay_scoring(envelope.get("report_json") or {})
-            ok = submit_weights(
-                subtensor_url=chain.subtensor_url,
-                netuid=chain.netuid,
-                weights_by_hotkey=replayed,
-            )
-            if ok and last_clean_end_block is not None:
-                _write_int_file(PUBLISHED_FILE, last_clean_end_block)
-        except Exception:
-            logger.exception("counter-weight step failed for %s", last_clean_epoch_id)
+            LAST_CLEAN_EPOCH_FILE.write_text(str(r["epoch_id"]))
 
     return worst
+
+
+def maybe_counter_weight(chain: ChainClient, api: ReportClient) -> None:
+    """Set the auditor's OWN weights on a block cadence (off unless enabled).
+
+    Continuous epoch-cadence process, NOT one-shot: each call reads how many
+    blocks since the auditor last set weights and, if at least
+    `weight_set_interval_blocks` have elapsed (≈300 blocks ≈ 1h), re-sets weights
+    from the latest CLEAN epoch's independently-replayed scores — shadowing the
+    honest validator and keeping the auditor's own vTrust from decaying. Re-uses
+    the last clean scores when no new report appeared this cycle. Never raises
+    into the loop.
+    """
+    from auditor.weights import (
+        auditor_hotkey_ss58,
+        is_weight_set_due,
+        submit_weights,
+        weight_set_interval_blocks,
+    )
+    from auditor.weights import (
+        is_enabled as cw_enabled,
+    )
+
+    if not cw_enabled():
+        return
+    hotkey = auditor_hotkey_ss58()
+    if hotkey is None:
+        return  # no wallet configured → stay read-only
+
+    interval = weight_set_interval_blocks()
+    try:
+        blocks_since = chain.blocks_since_weight_set(hotkey)
+        current = chain.get_current_block()
+    except Exception:
+        logger.exception("counter-weight: chain query failed; skipping this tick")
+        return
+
+    if not is_weight_set_due(blocks_since, interval):
+        logger.info(
+            "counter-weight: %s/%s blocks since last set (block %s) — not due",
+            blocks_since, interval, current,
+        )
+        return
+
+    epoch_id = _read_str_file(LAST_CLEAN_EPOCH_FILE)
+    if not epoch_id:
+        logger.info("counter-weight: due but no clean epoch audited yet — skipping")
+        return
+
+    logger.info(
+        "counter-weight: due (%s≥%s blocks since last set, block %s) — setting from %s",
+        blocks_since, interval, current, epoch_id,
+    )
+    try:
+        envelope = api.get_report(epoch_id)
+        replayed = replay_scoring(envelope.get("report_json") or {})
+        ok = submit_weights(
+            subtensor_url=chain.subtensor_url,
+            netuid=chain.netuid,
+            weights_by_hotkey=replayed,
+        )
+        if ok:
+            _write_int_file(PUBLISHED_FILE, current)
+    except Exception:
+        logger.exception("counter-weight step failed for %s", epoch_id)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -237,12 +298,15 @@ def main(argv: list[str] | None = None) -> None:
         while True:
             try:
                 audit_new_epochs(chain, api)
+                maybe_counter_weight(chain, api)  # block-cadence weight-set each tick
             except Exception:
                 logger.exception("audit loop iteration failed")
             time.sleep(interval)
 
     # default (and --once) -> single pass.
-    sys.exit(audit_new_epochs(chain, api))
+    code = audit_new_epochs(chain, api)
+    maybe_counter_weight(chain, api)
+    sys.exit(code)
 
 
 if __name__ == "__main__":
