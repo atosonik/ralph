@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import ralph_bootstrap  # noqa: F401
 from auditor.gate4 import (
     DEFAULT_GATE4_TOLERANCE,
-    EXIT_EVAL_DIVERGE,
     ESCALATION_BAND,
+    EXIT_EVAL_DIVERGE,
     TIER_CHEAP,
     TIER_H100_FULL,
     TIER_H200_KINGCHANGE,
