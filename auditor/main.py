@@ -232,7 +232,17 @@ def maybe_counter_weight(chain: ChainClient, api: ReportClient) -> None:
 
     epoch_id = _read_str_file(LAST_CLEAN_EPOCH_FILE)
     if not epoch_id:
-        logger.info("counter-weight: due but no clean epoch audited yet — skipping")
+        # No clean epoch to replay (e.g. the audit-reports repo is empty / 404).
+        # BURN FALLBACK: still set weights to uid 0 so the auditor-validator
+        # keeps its vTrust alive + burns to the owner, instead of skipping.
+        from auditor.weights import submit_burn_weights
+
+        logger.info(
+            "counter-weight: due but no clean epoch (empty/404 audit repo) — "
+            "BURN fallback to uid 0"
+        )
+        if submit_burn_weights(subtensor_url=chain.subtensor_url, netuid=chain.netuid):
+            _write_int_file(PUBLISHED_FILE, current)
         return
 
     logger.info(

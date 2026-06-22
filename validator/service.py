@@ -368,6 +368,15 @@ def _save_pending_weights(chain, weights: dict[str, float]) -> None:
     p.write_text(json.dumps(weights, indent=2, sort_keys=True))
 
 
+def _burn_fallback_enabled() -> bool:
+    """Burn-to-uid-0 when nothing is scoreable this epoch. On by default
+    (standard 'burn to owner' so the validator always sets weights + keeps
+    vTrust). Disable with RALPH_BURN_FALLBACK in {0,false,no,off}."""
+    return os.environ.get("RALPH_BURN_FALLBACK", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
 def _clear_pending_weights(chain) -> None:
     p = _pending_weights_path(chain)
     if p is not None and p.exists():
@@ -868,6 +877,13 @@ def run_epoch(
                 "set_weights returned False — pending_weights.json kept for "
                 "next-epoch retry. No credit was lost."
             )
+    elif _burn_fallback_enabled():
+        # BURN FALLBACK: nothing scoreable this epoch (no king, all rejected /
+        # zero submissions). Still set weights every epoch so the validator
+        # keeps its vTrust alive — burn the epoch's incentive to the owner uid
+        # (default 0). Disable with RALPH_BURN_FALLBACK=0.
+        log_info("no scoreable submissions this epoch — setting BURN weights (uid 0)")
+        weights_set = chain.set_burn_weights()
 
     # validation-v2 Phase 1: validator audit report + on-chain anchor.
     # Build report_json from this epoch's scored results, hash + sign, anchor

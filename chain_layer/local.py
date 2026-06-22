@@ -71,6 +71,19 @@ class LocalChain(ChainInterface):
         })
         return True
 
+    def set_burn_weights(self) -> bool:
+        """Burn fallback (sim): record a 100%-to-burn-uid weight event."""
+        import os as _os
+
+        burn_uid = int(_os.environ.get("RALPH_BURN_UID", "0"))
+        self.append_event({
+            "type": "weights_set",
+            "timestamp": time.time(),
+            "weights": {f"uid:{burn_uid}": 1.0},
+            "burn": True,
+        })
+        return True
+
     def get_king(self) -> Optional[KingRecord]:
         path = self.chain_dir / "king.json"
         if not path.exists():

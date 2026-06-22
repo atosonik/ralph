@@ -98,6 +98,61 @@ def _load_wallet():
     return bt.Wallet(name=name, hotkey=hotkey)
 
 
+def submit_burn_weights(
+    subtensor_url: str,
+    netuid: int,
+    burn_uid: int | None = None,
+) -> bool:
+    """Set the auditor's own weights to 100% on the burn uid (default 0 = owner).
+
+    Used when there is NO clean audit epoch to replay (e.g. the audit-reports
+    repo is empty / 404) so the auditor-validator still sets weights every
+    cadence — keeps its vTrust alive and burns to the owner uid instead of
+    silently skipping. Signed by the auditor's OWN wallet. Never raises.
+    """
+    if burn_uid is None:
+        burn_uid = int(os.environ.get("RALPH_BURN_UID", "0"))
+    wallet = _load_wallet()
+    if wallet is None:
+        return False
+    try:
+        import bittensor as bt
+        import torch
+
+        subtensor = bt.Subtensor(network=subtensor_url)
+        metagraph = subtensor.metagraph(netuid=netuid)
+    except Exception:
+        logger.exception("burn: failed to connect subtensor at %s", subtensor_url)
+        return False
+    try:
+        auditor_ss58 = wallet.hotkey.ss58_address
+        if auditor_ss58 not in list(metagraph.hotkeys):
+            logger.warning(
+                "burn: auditor hotkey %s not registered on netuid=%d — cannot set weights",
+                auditor_ss58, netuid,
+            )
+            return False
+        result = subtensor.set_weights(
+            wallet=wallet,
+            netuid=netuid,
+            uids=torch.tensor([burn_uid], dtype=torch.int64),
+            weights=torch.tensor([1.0], dtype=torch.float32),
+            wait_for_inclusion=True,
+            wait_for_finalization=False,
+        )
+        success = result.success if hasattr(result, "success") else bool(result)
+        logger.info("auditor BURN set_weights -> uid %d: success=%s", burn_uid, success)
+        return bool(success)
+    except Exception:
+        logger.exception("auditor burn set_weights failed")
+        return False
+    finally:
+        try:
+            subtensor.close()
+        except Exception:
+            pass
+
+
 def submit_weights(
     subtensor_url: str,
     netuid: int,
@@ -185,6 +240,7 @@ __all__ = [
     "auditor_hotkey_ss58",
     "is_enabled",
     "is_weight_set_due",
+    "submit_burn_weights",
     "submit_weights",
     "weight_set_interval_blocks",
 ]

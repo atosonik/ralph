@@ -265,7 +265,31 @@ class BittensorChain(ChainInterface):
         if not uids:
             print("[chain] no valid UIDs to set weights for")
             return False
+        return self._submit_weight_tensors(uids, weights)
 
+    def set_burn_weights(self) -> bool:
+        """Fallback: set 100% weight to the burn UID (default 0 = subnet owner).
+
+        Used when there is nothing real to score/audit this epoch so the
+        validator (and the auditor) STILL sets weights every epoch — this keeps
+        the validator's vTrust alive and burns the epoch's incentive to the
+        owner uid (standard "burn to owner" pattern) instead of silently setting
+        nothing. Override the target via env RALPH_BURN_UID.
+        """
+        import os as _os
+
+        burn_uid = int(_os.environ.get("RALPH_BURN_UID", "0"))
+        print(f"[chain] BURN fallback: 100% weight -> uid {burn_uid}")
+        self.sync()
+        return self._submit_weight_tensors([burn_uid], [1.0])
+
+    def _submit_weight_tensors(self, uids: list[int], weights: list[float]) -> bool:
+        """Normalize + submit one set_weights extrinsic for explicit uids/weights.
+
+        Shared by set_weights (hotkey-mapped scores) and set_burn_weights (the
+        uid-0 burn fallback) so both go through the identical rate-limit guard +
+        extrinsic + event path. Caller is responsible for self.sync().
+        """
         total = sum(weights) or 1.0
         weights = [w / total for w in weights]
 
