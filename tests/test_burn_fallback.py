@@ -54,3 +54,32 @@ def test_auditor_submit_burn_no_wallet_is_graceful(monkeypatch):
     monkeypatch.delenv("AUDITOR_WALLET_NAME", raising=False)
     # No wallet configured → returns False without raising (read-only).
     assert submit_burn_weights("ws://localhost:9944", 40) is False
+
+
+# ---------------------------------------- auditor robust to private/empty repo
+def test_report_client_treats_401_403_404_as_no_reports():
+    """A private/absent audit-reports repo returns 401/403/404 — the auditor must
+    treat that as 'no reports' (return []) and NOT crash on EXIT_NETWORK."""
+    from auditor.fetch import ReportClient
+
+    class _FakeResp:
+        def __init__(self, code):
+            self.status_code = code
+
+        def json(self):
+            return []
+
+        def raise_for_status(self):
+            raise AssertionError(f"raise_for_status should not be hit for {self.status_code}")
+
+    class _FakeSession:
+        def __init__(self, code):
+            self._code = code
+
+        def get(self, *a, **k):
+            return _FakeResp(self._code)
+
+    for code in (401, 403, 404):
+        c = ReportClient()
+        c._session = _FakeSession(code)
+        assert c.list_reports() == [], f"status {code} should yield []"

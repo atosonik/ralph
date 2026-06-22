@@ -475,6 +475,16 @@ def run_epoch(
         log_info(f"recovered {len(recovered)} pending weights from previous epoch")
 
     if not bundles and not recovered:
+        # Zero submissions this epoch — the validator would otherwise set no
+        # weights at all. BURN FALLBACK: still set weights to uid 0 so it keeps
+        # its vTrust alive + burns to the owner (standard). Best-effort; the
+        # chain's rate-limit guard skips it when set too often.
+        if _burn_fallback_enabled():
+            log_info("no pending submissions this epoch — setting BURN weights (uid 0)")
+            try:
+                chain.set_burn_weights()
+            except Exception as e:
+                log_warn(f"burn fallback failed (non-fatal): {e}")
         return {"submissions": 0, "accepted": 0, "rejected": 0}
 
     log_info(f"found {len(bundles)} pending submission(s)")
