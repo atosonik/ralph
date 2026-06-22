@@ -66,3 +66,35 @@ def test_verify_gpu_token_failclosed_on_mainnet(monkeypatch):
     monkeypatch.delenv("RALPH_ALLOW_REAL_ATTEST_STUB", raising=False)
     ok, detail = RA.verify_gpu_token("nonempty.token.value", "0x" + "00" * 32)
     assert not ok and "not implemented" in detail.lower()
+
+
+# ----------------------------------- get_token() bundle parsing (2026-06-22 CC report)
+def test_extract_gpu_jwt_from_bundle_and_bare():
+    import json as _json
+
+    # bundle as a Python list: [["JWT", outer], {detached...}]
+    bundle = [["JWT", "OUTER.JWT.STR"], {"GPU-0": "DETACHED.JWT"}]
+    assert RA._extract_gpu_jwt(bundle) == "OUTER.JWT.STR"
+    # bundle as a JSON string
+    assert RA._extract_gpu_jwt(_json.dumps(bundle)) == "OUTER.JWT.STR"
+    # bare JWT passes through unchanged (back-compat)
+    assert RA._extract_gpu_jwt("eyJhbG.body.sig") == "eyJhbG.body.sig"
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("jwt") is None, reason="PyJWT not installed"
+)
+def test_stub_accepts_real_get_token_bundle(monkeypatch):
+    """Regression for the miner's 'Invalid header string': the stub must parse
+    the get_token() bundle and decode the inner JWT, not the whole bundle."""
+    import json as _json
+
+    import jwt
+
+    monkeypatch.setenv("RALPH_ALLOW_REAL_ATTEST_STUB", "1")
+    bare = "ab12" * 16  # 64 hex
+    onchain = "0x" + bare
+    outer = jwt.encode({"eat_nonce": bare}, "secret", algorithm="HS256")
+    bundle = _json.dumps([["JWT", outer], {"GPU-0": outer}])  # nv-sdk shape
+    ok, detail = RA.verify_gpu_token(bundle, onchain)
+    assert ok, detail

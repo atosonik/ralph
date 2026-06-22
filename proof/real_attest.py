@@ -365,6 +365,40 @@ def generate_attestation(
 # Verification (validator side)
 # ============================================================================
 
+def _extract_gpu_jwt(token):
+    """Extract the outer JWT string from the nv-attestation-sdk get_token() value.
+
+    get_token() returns the detached-EAT BUNDLE, not a bare JWT:
+        [["JWT", <outer_jwt>], {"GPU-0": <detached_jwt>, ...}]
+    (or a JSON string of that). The stub used to feed the whole bundle to
+    jwt.decode → "Invalid header string" (the 2026-06-22 CC-hardware report).
+    Returns the outer JWT string; falls back to the input unchanged if it
+    already looks like a bare JWT (back-compat + unit-test fixtures).
+
+    NOTE: Part B (real NRAS verify) parses the FULL bundle — outer + each
+    detached per-GPU token + the submods digest binding. This helper only
+    pulls the outer JWT for the testnet stub's best-effort nonce check.
+    """
+    import json as _json
+
+    val = token
+    if isinstance(val, str):
+        s = val.strip()
+        if not s.startswith("[") and not s.startswith("{"):
+            return s  # already a bare JWT
+        try:
+            val = _json.loads(s)
+        except Exception:
+            return token
+    if isinstance(val, (list, tuple)) and val:
+        head = val[0]
+        if isinstance(head, (list, tuple)) and len(head) >= 2 and isinstance(head[1], str):
+            return head[1]
+        if isinstance(head, str):
+            return head
+    return token
+
+
 def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
     """Verify an NVIDIA GPU attestation JWT token.
 
@@ -394,8 +428,11 @@ def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
         )
         try:
             import jwt
-            claims = jwt.decode(token, options={"verify_signature": False})
-            token_nonce = claims.get("nonce", claims.get("eat_nonce", ""))
+            # get_token() returns the detached-EAT bundle; decode the OUTER JWT,
+            # not the whole bundle (fixes "Invalid header string").
+            inner = _extract_gpu_jwt(token)
+            claims = jwt.decode(inner, options={"verify_signature": False})
+            token_nonce = claims.get("eat_nonce", claims.get("nonce", ""))
             # Compare in the SDK's 64-hex form (token claim has no 0x prefix).
             exp = gpu_sdk_nonce(expected_nonce) if expected_nonce else ""
             if exp and gpu_sdk_nonce(token_nonce) != exp:
