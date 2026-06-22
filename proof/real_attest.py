@@ -134,6 +134,24 @@ def detect_capabilities() -> dict:
 # Evidence generation (miner side — runs inside the CVM)
 # ============================================================================
 
+def gpu_sdk_nonce(nonce: str) -> str:
+    """Canonical nonce form for the NVIDIA attestation SDK / GPU token claim.
+
+    The handshake nonce is committed on-chain as ``"0x" + 64 hex`` (66 chars),
+    but nv-attestation-sdk requires exactly 64 hex chars with NO prefix
+    ("Invalid Nonce Size" otherwise). Strip a leading 0x and lowercase so the
+    GENERATED token's nonce claim and the VALIDATOR's comparison use the same
+    form. (Issue 3 of the 2026-06-22 CC-hardware report.)
+
+    NOTE: TDX report_data binding intentionally keeps the FULL handshake nonce
+    (see ``_get_tdx_quote``) — do not route TDX through here.
+    """
+    n = nonce.strip()
+    if n[:2].lower() == "0x":
+        n = n[2:]
+    return n.lower()
+
+
 def _get_gpu_evidence(nonce: str) -> tuple[Optional[str], Optional[str]]:
     """Generate NVIDIA GPU attestation evidence + verify via NRAS.
 
@@ -142,8 +160,12 @@ def _get_gpu_evidence(nonce: str) -> tuple[Optional[str], Optional[str]]:
     try:
         from nv_attestation_sdk import attestation
 
-        client = attestation.Attestation()
-        client.set_nonce(nonce)
+        # Issue 1 (2026-06-22 CC report): Attestation() with no name makes
+        # nv-attestation-sdk 2.7.3 return an empty get_token(). A name is
+        # required for a non-empty EAT JWT.
+        client = attestation.Attestation("ralph-miner")
+        # Issue 3: SDK rejects the 0x-prefixed 66-char nonce; pass 64 hex.
+        client.set_nonce(gpu_sdk_nonce(nonce))
         client.add_verifier(
             attestation.Devices.GPU,
             attestation.Environment.REMOTE,
@@ -175,26 +197,45 @@ def _get_tdx_quote(nonce: str, user_data: str) -> tuple[Optional[str], Optional[
 
     report_data = hashlib.sha256((nonce + user_data).encode()).digest()
 
+    # Method 1: configfs-tsm interface (portable across kernel versions).
+    # Issue 2 (2026-06-22 CC report): creating the report node under
+    # /sys/kernel/config/tsm/report needs root, but the proof test runs as a
+    # non-root user. An operator can PRE-PROVISION a writable report node and
+    # point us at it via RALPH_TSM_REPORT_PATH (e.g. root pre-creates
+    # /sys/kernel/config/tsm/report/ralph and chowns it to the run user before
+    # the proof harness starts). If unset we still attempt makedirs (works when
+    # the harness has the privilege) and emit an actionable error if not.
+    preprov = os.environ.get("RALPH_TSM_REPORT_PATH", "").strip()
+    tsm_path = preprov or "/sys/kernel/config/tsm/report/ralph"
+    created = False
     try:
-        # Method 1: Direct /dev/tdx-guest ioctl (Linux kernel TDX guest driver)
-        tdx_dev = "/dev/tdx-guest" if os.path.exists("/dev/tdx-guest") else "/dev/tdx_guest"
-        # The tdx-guest device expects a specific ioctl; for now we use the
-        # configfs-tsm interface which is more portable across kernel versions.
-        tsm_path = "/sys/kernel/config/tsm/report/ralph"
-        os.makedirs(tsm_path, exist_ok=True)
+        if not preprov:
+            try:
+                os.makedirs(tsm_path, exist_ok=True)
+                created = True
+            except PermissionError:
+                print(
+                    "[attest] TDX quote: cannot create the configfs-tsm report node "
+                    f"at {tsm_path} (needs root). Run the quote step with privilege, "
+                    "or have root pre-create+chown a node and set "
+                    "RALPH_TSM_REPORT_PATH to it. Falling back to trustauthority-cli."
+                )
+                raise
         with open(f"{tsm_path}/inblob", "wb") as f:
             f.write(report_data[:64].ljust(64, b"\0"))
         with open(f"{tsm_path}/outblob", "rb") as f:
             quote_bytes = f.read()
         quote_hex = quote_bytes.hex()
-        # Cleanup
-        try:
-            os.rmdir(tsm_path)
-        except Exception:
-            pass
+        if created:
+            try:
+                os.rmdir(tsm_path)
+            except Exception:
+                pass
         return quote_hex, None  # No JWT for local TDX; validator verifies the raw quote
+    except PermissionError:
+        pass  # already logged; fall through to Method 2
     except Exception as e:
-        print(f"[attest] TDX quote generation failed: {e}")
+        print(f"[attest] TDX quote generation (configfs) failed: {e}")
 
     try:
         # Method 2: Intel Trust Authority client (if installed)
@@ -324,6 +365,40 @@ def generate_attestation(
 # Verification (validator side)
 # ============================================================================
 
+def _extract_gpu_jwt(token):
+    """Extract the outer JWT string from the nv-attestation-sdk get_token() value.
+
+    get_token() returns the detached-EAT BUNDLE, not a bare JWT:
+        [["JWT", <outer_jwt>], {"GPU-0": <detached_jwt>, ...}]
+    (or a JSON string of that). The stub used to feed the whole bundle to
+    jwt.decode → "Invalid header string" (the 2026-06-22 CC-hardware report).
+    Returns the outer JWT string; falls back to the input unchanged if it
+    already looks like a bare JWT (back-compat + unit-test fixtures).
+
+    NOTE: Part B (real NRAS verify) parses the FULL bundle — outer + each
+    detached per-GPU token + the submods digest binding. This helper only
+    pulls the outer JWT for the testnet stub's best-effort nonce check.
+    """
+    import json as _json
+
+    val = token
+    if isinstance(val, str):
+        s = val.strip()
+        if not s.startswith("[") and not s.startswith("{"):
+            return s  # already a bare JWT
+        try:
+            val = _json.loads(s)
+        except Exception:
+            return token
+    if isinstance(val, (list, tuple)) and val:
+        head = val[0]
+        if isinstance(head, (list, tuple)) and len(head) >= 2 and isinstance(head[1], str):
+            return head[1]
+        if isinstance(head, str):
+            return head
+    return token
+
+
 def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
     """Verify an NVIDIA GPU attestation JWT token.
 
@@ -353,12 +428,17 @@ def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
         )
         try:
             import jwt
-            claims = jwt.decode(token, options={"verify_signature": False})
-            token_nonce = claims.get("nonce", claims.get("eat_nonce", ""))
-            if expected_nonce and token_nonce != expected_nonce:
+            # get_token() returns the detached-EAT bundle; decode the OUTER JWT,
+            # not the whole bundle (fixes "Invalid header string").
+            inner = _extract_gpu_jwt(token)
+            claims = jwt.decode(inner, options={"verify_signature": False})
+            token_nonce = claims.get("eat_nonce", claims.get("nonce", ""))
+            # Compare in the SDK's 64-hex form (token claim has no 0x prefix).
+            exp = gpu_sdk_nonce(expected_nonce) if expected_nonce else ""
+            if exp and gpu_sdk_nonce(token_nonce) != exp:
                 return False, (
-                    f"nonce mismatch in GPU token (expected {expected_nonce[:16]}, "
-                    f"got {token_nonce[:16]})"
+                    f"nonce mismatch in GPU token (expected {exp[:16]}, "
+                    f"got {gpu_sdk_nonce(token_nonce)[:16]})"
                 )
             return True, "GPU token accepted (stub: signature unchecked)"
         except ImportError:
