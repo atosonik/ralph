@@ -377,6 +377,48 @@ def _burn_fallback_enabled() -> bool:
     }
 
 
+def _log_validator_standing(chain) -> None:
+    """Log this validator's own on-chain standing (uid / stake / vTrust / blocks
+    since last weight-set) so operators can SEE they're registered + active.
+    Best-effort, never raises; no-op on LocalChain (no metagraph)."""
+    try:
+        mg = getattr(chain, "metagraph", None)
+        wallet = getattr(chain, "wallet", None)
+        if mg is None or wallet is None:
+            return
+        ss58 = wallet.hotkey.ss58_address
+        hotkeys = list(getattr(mg, "hotkeys", []))
+        if ss58 not in hotkeys:
+            log_warn(f"STANDING: hotkey {ss58[:12]}… is NOT registered on the subnet")
+            return
+        uid = hotkeys.index(ss58)
+
+        def _f(attr):
+            try:
+                return float(getattr(mg, attr)[uid])
+            except Exception:
+                return None
+
+        stake = _f("S")
+        vtrust = _f("Tv")
+        if vtrust is None:
+            vtrust = _f("validator_trust")
+        try:
+            vpermit = bool(mg.validator_permit[uid])
+        except Exception:
+            vpermit = None
+        parts = [f"uid={uid}"]
+        if stake is not None:
+            parts.append(f"stake={stake:.1f}")
+        if vtrust is not None:
+            parts.append(f"vtrust={vtrust:.4f}")
+        if vpermit is not None:
+            parts.append(f"vpermit={vpermit}")
+        log_info("STANDING: " + " ".join(parts))
+    except Exception as e:
+        log_debug(f"standing log failed: {e}")
+
+
 def _clear_pending_weights(chain) -> None:
     p = _pending_weights_path(chain)
     if p is not None and p.exists():
@@ -877,23 +919,34 @@ def run_epoch(
         # Persist BEFORE attempting set_weights so a crash / rate-limit
         # mid-flight doesn't lose this epoch's credits.
         _save_pending_weights(chain, round_scores)
-        log_info(f"setting weights for {len(round_scores)} miners (split: king 90% / mf 10%)...")
+        # Show exactly what's being set (top entries) so validators can SEE the
+        # weight decision in the logs, not just "setting weights".
+        preview = ", ".join(
+            f"{hk[:12]}…={w:.3f}"
+            for hk, w in sorted(round_scores.items(), key=lambda kv: -kv[1])[:5]
+        )
+        log_info(f"WEIGHTS: setting {len(round_scores)} miner(s) [king 90% / mf 10%]: {preview}")
         ok = chain.set_weights(round_scores)
+        weights_set = ok
         if ok:
-            weights_set = True
             _clear_pending_weights(chain)
+            log_info("WEIGHTS: ✓ set on-chain")
         else:
             log_warn(
-                "set_weights returned False — pending_weights.json kept for "
-                "next-epoch retry. No credit was lost."
+                "WEIGHTS: deferred (rate-limited / failed) — pending_weights kept, "
+                "retry next epoch (no credit lost)"
             )
     elif _burn_fallback_enabled():
         # BURN FALLBACK: nothing scoreable this epoch (no king, all rejected /
         # zero submissions). Still set weights every epoch so the validator
         # keeps its vTrust alive — burn the epoch's incentive to the owner uid
         # (default 0). Disable with RALPH_BURN_FALLBACK=0.
-        log_info("no scoreable submissions this epoch — setting BURN weights (uid 0)")
+        log_info("WEIGHTS: no scoreable submissions — setting BURN weights (100% → uid 0)")
         weights_set = chain.set_burn_weights()
+        log_info(
+            "WEIGHTS: ✓ burn set on-chain" if weights_set
+            else "WEIGHTS: burn deferred (rate-limited) — retry next epoch"
+        )
 
     # validation-v2 Phase 1: validator audit report + on-chain anchor.
     # Build report_json from this epoch's scored results, hash + sign, anchor
@@ -1113,6 +1166,15 @@ def main():
         except Exception as e:
             log_err(f"epoch {epoch} failed: {e}")
             log_debug(traceback.format_exc())
+
+        # Periodic on-chain standing so operators see they're registered + active
+        # (addresses validators worried by quiet logs). Cheap: one metagraph sync.
+        if epoch == 1 or epoch % 10 == 0:
+            try:
+                chain.sync()
+            except Exception:
+                pass
+            _log_validator_standing(chain)
 
         if args.once:
             break

@@ -90,11 +90,25 @@ def _read_str_file(path: Path) -> str | None:
 
 
 def _setup_logging(verbose: bool) -> None:
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s | %(levelname)-8s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    """Configure the 'ralph-auditor' logger so it survives bittensor's logging
+    hijack.
+
+    Importing bittensor (auditor.chain) runs bt.logging, which raises the ROOT
+    logger to WARNING ("Enabling default logging (Warning level)") and silences
+    any INFO that propagates to root — so a plain logging.basicConfig() makes the
+    auditor go SILENT after startup (validators saw exactly this). We instead give
+    OUR logger its own handler + level and set propagate=False, so the auditor's
+    output is independent of whatever bittensor does to the root logger.
+    """
+    level = logging.DEBUG if verbose else logging.INFO
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False  # don't route through root (bittensor pins it to WARNING)
 
 
 def audit_epoch(epoch_id: str, chain: ChainClient, api: ReportClient) -> int:
@@ -171,6 +185,13 @@ def audit_new_epochs(chain: ChainClient, api: ReportClient) -> int:
     except Exception as exc:
         logger.error("failed to list reports: %s", exc)
         return EXIT_NETWORK
+
+    if not reports:
+        logger.info(
+            "no audit reports published yet (repo empty / not public) — "
+            "nothing to verify this pass"
+        )
+        return EXIT_CLEAN
 
     sorted_reports = sorted(reports, key=lambda r: r.get("epoch_end_block") or 0)
     worst = EXIT_CLEAN
@@ -305,10 +326,15 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(audit_epoch(args.epoch, chain, api))
 
     if args.loop_:
+        logger.info(
+            "auditor loop started — repo=%s netuid=%s interval=%ss (subtensor=%s)",
+            repo, netuid, interval, subtensor_url,
+        )
         while True:
             try:
-                audit_new_epochs(chain, api)
+                code = audit_new_epochs(chain, api)
                 maybe_counter_weight(chain, api)  # block-cadence weight-set each tick
+                logger.info("audit pass complete (exit=%s) — sleeping %ss", code, interval)
             except Exception:
                 logger.exception("audit loop iteration failed")
             time.sleep(interval)
