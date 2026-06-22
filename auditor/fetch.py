@@ -45,10 +45,18 @@ class ReportClient:
 
     def list_reports(self) -> list[dict]:
         """Return the index.json list (one thin entry per epoch). Empty list if
-        the index doesn't exist yet."""
+        the index isn't available yet.
+
+        Treats 404 (no index file), 401/403 (repo private or doesn't exist yet —
+        HF returns 401 for an unauthenticated request to a missing/gated repo)
+        as "no reports available to me" rather than a hard error. This keeps the
+        auditor RUNNING (and, when weight-setting is enabled, falling back to the
+        uid-0 burn) instead of crashing on EXIT_NETWORK while the validator
+        hasn't published / made the repo public yet.
+        """
         url = self._resolve_url(f"{_REPO_SUBDIR}/index.json")
         r = self._session.get(url, timeout=self._timeout)
-        if r.status_code == 404:
+        if r.status_code in (401, 403, 404):
             return []
         r.raise_for_status()
         data = r.json()
