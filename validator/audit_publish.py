@@ -112,7 +112,7 @@ def publish_report_hf(
 
     api = HfApi(token=token)
     # Create-if-missing; exist_ok so steady-state publishes are a no-op here.
-    api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, token=token)
+    api.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True, private=True, token=token)
 
     # 1. upload the per-epoch envelope.
     envelope_bytes = json.dumps(

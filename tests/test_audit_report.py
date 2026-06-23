@@ -435,8 +435,8 @@ class _FakeHfApi:
         self.created = []
         self.uploads = {}  # path_in_repo -> bytes
 
-    def create_repo(self, repo_id, repo_type=None, exist_ok=False, token=None):
-        self.created.append((repo_id, repo_type, exist_ok))
+    def create_repo(self, repo_id, repo_type=None, exist_ok=False, private=False, token=None):
+        self.created.append((repo_id, repo_type, exist_ok, private))
 
     def upload_file(self, *, path_or_fileobj, path_in_repo, repo_id, repo_type,
                     token=None, commit_message=None):

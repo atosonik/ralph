@@ -65,7 +65,7 @@ def upload_bundle(
     api = HfApi(token=token)
 
     try:
-        api.create_repo(repo_id, repo_type="dataset", exist_ok=True)
+        api.create_repo(repo_id, repo_type="dataset", exist_ok=True, private=True)
     except Exception:
         pass
 
