@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 
@@ -37,6 +38,7 @@ def upload_bundle(
     token: str | None = None,
     rationale_text: str = "",
     patch_path: Path | None = None,
+    encrypt: bool | None = None,
 ) -> str:
     """Upload a proof bundle as a single HF PR. Returns the PR URL.
 
@@ -65,7 +67,7 @@ def upload_bundle(
     api = HfApi(token=token)
 
     try:
-        api.create_repo(repo_id, repo_type="dataset", exist_ok=True, private=True)
+        api.create_repo(repo_id, repo_type="dataset", exist_ok=True)
     except Exception:
         pass
 
@@ -99,13 +101,62 @@ def upload_bundle(
             files = [(lp, rn) for (lp, rn) in files if rn != "patch.diff"]
             files.append((patch_path, "patch.diff"))
 
-    operations = [
-        CommitOperationAdd(path_in_repo=f"{prefix}/{remote_name}", path_or_fileobj=str(local_path))
-        for (local_path, remote_name) in files
-        if local_path.exists()
-    ]
-    total_mb = sum(p.stat().st_size for (p, _) in files if p.exists()) / 1e6
-    print(f"[hub] uploading {len(operations)} files ({total_mb:.1f} MB) as PR → {repo_id}/{prefix}")
+    # Encrypt the bundle to the validator key unless explicitly disabled or no
+    # key is configured (testnet / local). The decrypted blob reproduces this
+    # exact directory layout, so the validator's verify path is unchanged.
+    from proof import bundle_crypto
+
+    do_enc = encrypt
+    if do_enc is None:
+        do_enc = os.environ.get("RALPH_DISABLE_BUNDLE_ENC") != "1"
+    pubkey = None
+    if do_enc:
+        try:
+            pubkey = bundle_crypto.load_validator_pubkey()
+        except RuntimeError as e:
+            print(f"[hub] bundle encryption off ({e}); uploading plaintext")
+            do_enc = False
+
+    if do_enc:
+        import tempfile
+
+        # Final arcnames mirror the on-disk layout the validator rebuilds:
+        # training artifacts under training/, everything else at the root.
+        tar_files = [
+            (lp, f"training/{rn}" if Path(lp).parent.name == "training" else rn)
+            for (lp, rn) in files
+            if lp.exists()
+        ]
+        blob = bundle_crypto.encrypt(bundle_crypto.pack_bundle(tar_files), pubkey)
+        tmp = Path(tempfile.mkdtemp())
+        enc_path = tmp / bundle_crypto.ENC_FILENAME
+        enc_path.write_bytes(blob)
+        pub_manifest = {
+            "bundle_hash": bundle_hash,
+            "manifest_sha256": manifest.get("manifest_sha256"),
+            "parent_hash": manifest.get("parent_hash"),
+            "attestation_type": manifest.get("attestation_type"),
+            "encrypted": True,
+            "enc_scheme": bundle_crypto.ENC_SCHEME,
+        }
+        man_path = tmp / bundle_crypto.PUBLIC_MANIFEST
+        man_path.write_text(json.dumps(pub_manifest, indent=2))
+        operations = [
+            CommitOperationAdd(path_in_repo=f"{prefix}/{bundle_crypto.ENC_FILENAME}",
+                               path_or_fileobj=str(enc_path)),
+            CommitOperationAdd(path_in_repo=f"{prefix}/{bundle_crypto.PUBLIC_MANIFEST}",
+                               path_or_fileobj=str(man_path)),
+        ]
+        total_mb = enc_path.stat().st_size / 1e6
+        print(f"[hub] uploading encrypted bundle ({total_mb:.1f} MB) as PR → {repo_id}/{prefix}")
+    else:
+        operations = [
+            CommitOperationAdd(path_in_repo=f"{prefix}/{remote_name}", path_or_fileobj=str(local_path))
+            for (local_path, remote_name) in files
+            if local_path.exists()
+        ]
+        total_mb = sum(p.stat().st_size for (p, _) in files if p.exists()) / 1e6
+        print(f"[hub] uploading {len(operations)} files ({total_mb:.1f} MB) as PR → {repo_id}/{prefix}")
 
     # PR description: rationale upfront, then bundle identification.
     # Cap rationale to ~60 KB so we don't trip the HF commit-description limit.
@@ -152,6 +203,8 @@ def download_bundle(
     """Download a proof bundle from HuggingFace Hub. Returns local path."""
     from huggingface_hub import hf_hub_download, list_repo_tree
 
+    from proof import bundle_crypto
+
     prefix = f"submissions/{bundle_hash}"
     if out_dir is None:
         out_dir = Path(f"/tmp/ralph_bundles/{bundle_hash[:16]}")
@@ -174,6 +227,16 @@ def download_bundle(
             f"{prefix}/attestation.json",
             f"{prefix}/submission.json",
         ]
+
+    enc_remote = f"{prefix}/{bundle_crypto.ENC_FILENAME}"
+    if enc_remote in files:
+        local = hf_hub_download(repo_id=repo_id, filename=enc_remote, repo_type="dataset",
+                                local_dir=str(out_dir / "_hf_cache"), token=token)
+        bundle_crypto.unpack_bundle(bundle_crypto.decrypt(Path(local).read_bytes()), out_dir)
+        import shutil
+        shutil.rmtree(out_dir / "_hf_cache", ignore_errors=True)
+        print(f"[hub] downloaded + decrypted to {out_dir}")
+        return out_dir
 
     for remote_path in files:
         filename = remote_path.split("/")[-1]

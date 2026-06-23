@@ -38,6 +38,7 @@ chain = [
 attest = [
     "pyjwt[crypto]>=2.7",
     "dcap-qvl>=0.5",
+    "pynacl>=1.5",
 ]
 dev = [
     "pytest>=7.4",
