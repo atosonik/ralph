@@ -61,11 +61,13 @@ def test_verify_gpu_token_empty_is_rejected():
     assert not ok and "empty" in detail.lower()
 
 
-# ------------------------------------------------ mainnet stays fail-closed (Issue 4)
-def test_verify_gpu_token_failclosed_on_mainnet(monkeypatch):
+# ------------------------------------------------ mainnet really verifies now
+def test_verify_gpu_token_rejects_junk_on_mainnet(monkeypatch):
+    # Production path does real NRAS-JWKS ES384 verification; a junk token has no
+    # valid NVIDIA signature → rejected (fails before any network fetch).
     monkeypatch.delenv("RALPH_ALLOW_REAL_ATTEST_STUB", raising=False)
-    ok, detail = RA.verify_gpu_token("nonempty.token.value", "0x" + "00" * 32)
-    assert not ok and "not implemented" in detail.lower()
+    ok, _ = RA.verify_gpu_token("nonempty.token.value", "0x" + "00" * 32)
+    assert not ok
 
 
 # ----------------------------------- get_token() bundle parsing (2026-06-22 CC report)

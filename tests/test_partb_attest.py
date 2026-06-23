@@ -65,12 +65,14 @@ def test_verify_tdx_quote_stub_rejects_wrong_binding(monkeypatch):
     assert not ok and "report_data" in detail.lower()
 
 
-def test_verify_tdx_quote_mainnet_failclosed(monkeypatch):
+def test_verify_tdx_quote_rejects_fake_on_mainnet(monkeypatch):
+    # Production path runs dcap-qvl; a fabricated (non-Intel-signed) quote is
+    # rejected at parse/verify — well before any binding check.
     monkeypatch.delenv("RALPH_ALLOW_REAL_ATTEST_STUB", raising=False)
     nonce = "0x" + "11" * 32
     ud = RA.build_user_data("cm", "roll", nonce)
-    ok, detail = RA.verify_tdx_quote(_fake_quote_with_report_data(nonce, ud), nonce, ud)
-    assert not ok and "not implemented" in detail.lower()
+    ok, _ = RA.verify_tdx_quote(_fake_quote_with_report_data(nonce, ud), nonce, ud)
+    assert not ok
 
 
 def test_verify_tdx_quote_empty():

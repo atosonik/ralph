@@ -31,6 +31,10 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
+# NVIDIA NRAS published JWKS (EC P-384 / ES384). kid rotates daily; the validator
+# verifies each EAT signature against the matching key fetched (+cached) here.
+_NRAS_JWKS_URL = "https://nras.attestation.nvidia.com/.well-known/jwks.json"
+
 # ============================================================================
 # Data structures — same shape as mock_attest.py for validator compatibility
 # ============================================================================
@@ -502,10 +506,10 @@ def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
     — i.e. accepted any token whose nonce claim happened to match. Either is
     a free verified-tier pass for anyone with a JSON editor.
 
-    Until the NRAS JWKS verification is wired (TODO: real_nvcc_only on real
-    H100-CC silicon), this function REFUSES verified-tier attestation. To
-    allow a loud-warning mock-style acceptance on testnet, set the env var
-    RALPH_ALLOW_REAL_ATTEST_STUB=1 — but never set this on mainnet.
+    The production path verifies the nested NRAS EAT signatures against NVIDIA's
+    published JWKS (EC P-384 / ES384), then gates x-nvidia-overall-att-result
+    and the eat_nonce binding. For a loud-warning nonce-only acceptance on
+    testnet, set RALPH_ALLOW_REAL_ATTEST_STUB=1 — but never set this on mainnet.
     """
     import os as _os
     if not token:
@@ -552,14 +556,37 @@ def verify_gpu_token(token: str, expected_nonce: str) -> tuple[bool, str]:
         except Exception as e:
             return False, f"GPU token decode failed: {e}"
 
-    # Production path: we don't have NRAS JWKS verification wired yet.
-    # Fail-closed. Wire jwt verification against NVIDIA's published JWKS
-    # before flipping this to a verified result.
-    return False, (
-        "GPU token signature verification not implemented. "
-        "Wire NRAS JWKS verification before accepting real_nvcc_only "
-        "attestation, or set RALPH_ALLOW_REAL_ATTEST_STUB=1 (testnet only)."
-    )
+    # Production path: verify the nested NRAS EAT signatures against NVIDIA's
+    # published JWKS (EC P-384 / ES384), then gate the attestation result + the
+    # nonce binding. NVIDIA's trust model is JWKS-over-HTTPS (the kid rotates
+    # daily); we verify the EAT signature against the matching key.
+    try:
+        import jwt
+        from jwt import PyJWKClient
+    except ImportError:
+        return False, "PyJWT[crypto] not installed — cannot verify GPU token"
+
+    _, gpu_eats = parse_nras_bundle(token)
+    if not gpu_eats:
+        return False, "no GPU EAT found in NRAS token bundle"
+    exp = gpu_sdk_nonce(expected_nonce) if expected_nonce else ""
+    try:
+        jwks = PyJWKClient(_NRAS_JWKS_URL)
+    except Exception as e:
+        return False, f"NRAS JWKS client init failed: {e}"
+
+    for eat in gpu_eats:
+        try:
+            key = jwks.get_signing_key_from_jwt(eat).key
+            claims = jwt.decode(eat, key, algorithms=["ES384"], options={"verify_aud": False})
+        except Exception as e:
+            return False, f"GPU EAT signature verification failed: {e}"
+        if claims.get("x-nvidia-overall-att-result") is not True:
+            return False, "GPU attestation not successful (x-nvidia-overall-att-result != true)"
+        tok = gpu_sdk_nonce(str(claims.get("eat_nonce") or claims.get("nonce") or ""))
+        if exp and tok != exp:
+            return False, f"GPU eat_nonce mismatch (expected {exp[:16]}, got {tok[:16]})"
+    return True, f"GPU token verified (NRAS ES384 + result + nonce; {len(gpu_eats)} GPU EAT)"
 
 
 def verify_tdx_quote(
@@ -577,17 +604,15 @@ def verify_tdx_quote(
     this needs `expected_user_data` (rebuilt by the caller via `build_user_data`,
     byte-identical to the miner's `_get_tdx_quote`).
 
-    Full verification (finalized against captured CC fixtures + dcap-qvl):
-      1. Intel DCAP signature chain to the PINNED Intel SGX Root CA + TCB status.
+    Full verification (dcap-qvl):
+      1. Intel DCAP signature chain to Intel's roots + acceptable TCB status.
       2. report_data[:32] == sha256(expected_nonce + expected_user_data); tail 0.
-      3. MRTD/RTMRs present in `measurement_allowlist` (proof/cc_allowlist.yaml).
+      3. MRTD present in `measurement_allowlist` when one is supplied.
 
-    STATUS: the DCAP signature-chain + structured report_data extraction need the
-    `dcap-qvl` lib + the pinned Intel root + real-quote validation — pending the
-    miner's 10 fixtures. Until then the PRODUCTION path FAIL-CLOSES. The testnet
-    stub (RALPH_ALLOW_REAL_ATTEST_STUB=1) now ALSO checks the report_data binding
-    (best-effort: the expected digest must appear in the quote), so a quote from
-    a different submission / nonce is rejected even in stub mode.
+    The production path runs all three. The testnet stub
+    (RALPH_ALLOW_REAL_ATTEST_STUB=1) skips the Intel signature/TCB chain but
+    still checks the report_data binding, so a quote from a different submission
+    / nonce is rejected even in stub mode.
     """
     import hashlib as _hl
     import os as _os
@@ -620,12 +645,57 @@ def verify_tdx_quote(
             f"{len(quote_bytes)} bytes)"
         )
 
-    return False, (
-        "TDX quote verification not implemented (Part B). Wire dcap-qvl: verify "
-        "the Intel signature chain to the pinned SGX root + TCB status, check "
-        "report_data[:32] == sha256(nonce||user_data), and MRTD/RTMRs against the "
-        "allowlist. Or set RALPH_ALLOW_REAL_ATTEST_STUB=1 (testnet only)."
-    )
+    # Production path: Intel DCAP verification via dcap-qvl — verifies the quote's
+    # signature chain to Intel's roots + TCB status, then we bind report_data and
+    # (when provided) gate MRTD/RTMRs against the allowlist.
+    try:
+        import dcap_qvl
+    except ImportError:
+        return False, "dcap-qvl not installed — cannot verify TDX quote (pip install dcap-qvl)"
+    try:
+        quote_bytes = bytes.fromhex(quote_hex)
+    except ValueError as e:
+        return False, f"TDX quote hex decode failed: {e}"
+
+    try:
+        quote = dcap_qvl.parse_quote(quote_bytes)
+    except Exception as e:
+        return False, f"TDX quote parse failed: {e}"
+    if not quote.is_tdx:
+        return False, "not a TDX quote (SGX/other tee rejected)"
+
+    # Verify the quote's signature chain to Intel's roots + TCB status.
+    try:
+        vr = dcap_qvl.get_collateral_and_verify(quote_bytes)
+    except Exception as e:
+        return False, f"TDX DCAP verification failed: {e}"
+    status = str(getattr(vr, "status", "")).upper()
+    allowed_tcb = {"OK", "UPTODATE"}
+    extra = _os.environ.get("RALPH_TDX_ALLOWED_TCB", "")
+    allowed_tcb |= {s.strip().upper() for s in extra.split(",") if s.strip()}
+    if status not in allowed_tcb:
+        return False, f"TDX TCB status not acceptable: {status!r} (advisories={getattr(vr, 'advisory_ids', None)})"
+
+    # report_data binding: first 32 bytes == sha256(nonce||user_data); tail zero.
+    try:
+        rd = bytes(quote.report.report_data)
+    except Exception as e:
+        return False, f"TDX report_data unreadable: {e}"
+    if rd[:32] != expected_rd or any(rd[32:]):
+        return False, "report_data binding failed (quote not bound to this nonce/user_data)"
+
+    # MRTD/RTMR allowlist — proves it booted OUR approved CVM image. Enforced
+    # when an allowlist is supplied; until the approved measurements are pinned
+    # from a real run, this is left open (sig-chain + report_data still gate).
+    if measurement_allowlist:
+        try:
+            mrtd = bytes(quote.report.mr_td).hex()
+        except Exception as e:
+            return False, f"TDX mr_td unreadable: {e}"
+        if mrtd not in {str(m).lower() for m in measurement_allowlist}:
+            return False, f"TDX MRTD not in allowlist ({mrtd[:16]}…)"
+
+    return True, f"TDX quote verified (DCAP {status} + report_data BOUND)"
 
 
 def _required_attest_level() -> str:
