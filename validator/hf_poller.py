@@ -88,6 +88,8 @@ def download_one(
     """
     from huggingface_hub import hf_hub_download, list_repo_files
 
+    from proof import bundle_crypto
+
     out = dest_dir / bundle_id
     if out.exists():
         shutil.rmtree(out)
@@ -112,27 +114,45 @@ def download_one(
         print(f"[hf_poller] no files found for {bundle_id} @ {git_ref}")
         return False
 
-    success = 0
-    for remote_path in bundle_files:
-        filename = remote_path.split("/")[-1]
+    cache = out / "_hf_cache"
+    enc_remote = f"{prefix}{bundle_crypto.ENC_FILENAME}"
+    if enc_remote in bundle_files:
+        # Encrypted submission: download the blob, decrypt with the validator
+        # key, and unpack — reproduces the same dir a plaintext bundle would.
         try:
             local = hf_hub_download(
-                repo_id=repo_id,
-                filename=remote_path,
-                repo_type="dataset",
-                local_dir=str(out / "_hf_cache"),
-                token=token,
-                revision=git_ref,
+                repo_id=repo_id, filename=enc_remote, repo_type="dataset",
+                local_dir=str(cache), token=token, revision=git_ref,
             )
-            dest = (training_dir / filename) if filename in training_files else (out / filename)
-            shutil.copy2(local, dest)
-            success += 1
+            blob = bundle_crypto.decrypt(Path(local).read_bytes())
+            bundle_crypto.unpack_bundle(blob, out)
+            success = 1
         except Exception as e:
-            print(f"[hf_poller] download {filename} failed: {e}")
+            print(f"[hf_poller] decrypt/unpack failed for {bundle_id}: {e}")
+            success = 0
+    else:
+        # Legacy plaintext: download each file into the bundle dir.
+        success = 0
+        for remote_path in bundle_files:
+            filename = remote_path.split("/")[-1]
+            try:
+                local = hf_hub_download(
+                    repo_id=repo_id,
+                    filename=remote_path,
+                    repo_type="dataset",
+                    local_dir=str(cache),
+                    token=token,
+                    revision=git_ref,
+                )
+                dest = (training_dir / filename) if filename in training_files else (out / filename)
+                shutil.copy2(local, dest)
+                success += 1
+            except Exception as e:
+                print(f"[hf_poller] download {filename} failed: {e}")
 
-    cache = out / "_hf_cache"
     if cache.exists():
         shutil.rmtree(cache)
+    training_dir.mkdir(exist_ok=True)  # encrypted bundles without training/ still get the dir
 
     if success == 0:
         shutil.rmtree(out)
