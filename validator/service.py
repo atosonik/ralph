@@ -253,7 +253,7 @@ def score_and_decide(
     noise_floor_margin: float,
 ) -> dict:
     """Score one submission against the current king. Returns a result dict."""
-    result = judge_submission(RALPH_ROOT, bundle_dir)
+    result = judge_submission(RALPH_ROOT, bundle_dir, chain=chain)
 
     if result.rejected:
         return {

@@ -172,6 +172,7 @@ def op1_diff_and_integrity(
     ralph_root: Path,
     submission_payload: dict,
     proof_dir: Path,
+    chain=None,
 ) -> tuple[bool, str]:
     """Verify miner signature + bundle integrity + restricted-file scan.
 
@@ -256,20 +257,30 @@ def op1_diff_and_integrity(
     # miners — set RALPH_SKIP_HANDSHAKE=1 to skip in that mode.
     import os as _os
     if not _os.environ.get("RALPH_SKIP_HANDSHAKE"):
-        chain_entry = lookup_handshake(ralph_root, submission_payload["handshake_nonce"])
-        if chain_entry is None:
-            return False, "handshake nonce not found on chain"
-        if chain_entry.get("miner_hotkey") != submission_payload["miner_hotkey"]:
-            return False, "handshake nonce was committed by a different miner"
-        # #9: cross-check that the patch the miner committed on-chain matches
-        # the patch in the bundle. Without this, a miner can commit "look
-        # I'm running patch X" and ship a bundle for entirely different patch Y.
-        chain_patch_hash = chain_entry.get("patch_hash")
-        if chain_patch_hash and patch_sha and chain_patch_hash != patch_sha:
-            return False, (
-                f"on-chain patch_hash mismatch: chain={chain_patch_hash[:12]}, "
-                f"bundle={patch_sha[:12]}"
+        # Verify the handshake binds (hotkey, patch_hash, nonce). With a chain
+        # handle this queries the miner's LIVE on-chain commitment (works for
+        # any external miner — #9 patch cross-check is folded into the hash).
+        # Without one, fall back to the local handshakes.jsonl record.
+        if chain is not None and hasattr(chain, "verify_handshake_onchain"):
+            ok_hs, detail_hs = chain.verify_handshake_onchain(
+                submission_payload["miner_hotkey"],
+                patch_sha or "",
+                submission_payload["handshake_nonce"],
             )
+            if not ok_hs:
+                return False, detail_hs
+        else:
+            chain_entry = lookup_handshake(ralph_root, submission_payload["handshake_nonce"])
+            if chain_entry is None:
+                return False, "handshake nonce not found on chain"
+            if chain_entry.get("miner_hotkey") != submission_payload["miner_hotkey"]:
+                return False, "handshake nonce was committed by a different miner"
+            chain_patch_hash = chain_entry.get("patch_hash")
+            if chain_patch_hash and patch_sha and chain_patch_hash != patch_sha:
+                return False, (
+                    f"on-chain patch_hash mismatch: chain={chain_patch_hash[:12]}, "
+                    f"bundle={patch_sha[:12]}"
+                )
 
     # #12: restricted-file scanner now runs on the validator side. The
     # miner-side scan in proof.runner was bypassable by a miner who skipped
@@ -583,8 +594,13 @@ def op4_hidden_eval(
 def judge_submission(
     ralph_root: Path,
     proof_dir: Path,
+    chain=None,
 ) -> ValidatorResult:
-    """Run the four ops in order. Any failure shorts out and returns a rejection."""
+    """Run the four ops in order. Any failure shorts out and returns a rejection.
+
+    `chain`, when provided, lets op1 verify the handshake against the live
+    on-chain commitment instead of the local handshakes.jsonl record.
+    """
     sub_path = proof_dir / "submission.json"
     if not sub_path.exists():
         return ValidatorResult(
@@ -602,7 +618,7 @@ def judge_submission(
         handshake_nonce=submission["handshake_nonce"],
     )
 
-    ok, detail = op1_diff_and_integrity(ralph_root, submission, proof_dir)
+    ok, detail = op1_diff_and_integrity(ralph_root, submission, proof_dir, chain=chain)
     result.operations["op1_diff_integrity"] = {"ok": ok, "detail": detail}
     if not ok:
         result.rejected = ValidatorReject("op1_diff_integrity", detail)

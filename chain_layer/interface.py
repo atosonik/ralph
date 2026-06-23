@@ -64,6 +64,26 @@ class ChainInterface(ABC):
     def lookup_handshake(self, nonce: str) -> Optional[HandshakeRecord]:
         """Verify a nonce was committed. Returns the record or None."""
 
+    def verify_handshake_onchain(
+        self, miner_hotkey: str, patch_hash: str, nonce: str
+    ) -> tuple[bool, str]:
+        """Verify a miner's handshake binds (hotkey, patch_hash, nonce).
+
+        Default implementation uses the local `lookup_handshake` record;
+        BittensorChain overrides this to query the live on-chain commitment.
+        """
+        rec = self.lookup_handshake(nonce)
+        if rec is None:
+            return False, "handshake nonce not found on chain"
+        if rec.miner_hotkey != miner_hotkey:
+            return False, "handshake nonce was committed by a different miner"
+        if patch_hash and rec.patch_hash and rec.patch_hash != patch_hash:
+            return False, (
+                f"on-chain patch_hash mismatch: chain={rec.patch_hash[:12]}, "
+                f"bundle={patch_hash[:12]}"
+            )
+        return True, "handshake verified"
+
     @abstractmethod
     def is_hotkey_registered(self, hotkey: str) -> bool:
         """Check if a hotkey is registered on the subnet."""

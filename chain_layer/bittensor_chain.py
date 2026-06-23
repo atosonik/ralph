@@ -41,6 +41,20 @@ import torch
 from .interface import ChainInterface, HandshakeRecord, KingRecord
 
 
+def handshake_commit_hash(miner_hotkey: str, patch_hash: str, nonce: str) -> str:
+    """The on-chain handshake commitment payload hash — SINGLE SOURCE OF TRUTH.
+
+    Used by request_handshake_nonce (the miner commits this hash) and by
+    verify_handshake_onchain (the validator reconstructs it from the submission
+    and compares against the miner's on-chain commitment). Binding all three of
+    hotkey/patch_hash/nonce into the preimage means one hash compare verifies
+    all three at once.
+    """
+    return hashlib.sha256(
+        f"karpa:handshake:{miner_hotkey}:{patch_hash}:{nonce}".encode()
+    ).hexdigest()
+
+
 def _locked_append(path: Path, text: str) -> None:
     """Append text to a file with an advisory exclusive lock.
 
@@ -121,8 +135,7 @@ class BittensorChain(ChainInterface):
         invisible to the chain.
         """
         nonce = "0x" + secrets.token_hex(32)
-        commit_data = f"karpa:handshake:{miner_hotkey}:{patch_hash}:{nonce}"
-        commit_hash = hashlib.sha256(commit_data.encode()).hexdigest()
+        commit_hash = handshake_commit_hash(miner_hotkey, patch_hash, nonce)
 
         try:
             self.subtensor.set_commitment(
@@ -224,6 +237,35 @@ class BittensorChain(ChainInterface):
                     timestamp=entry["timestamp"],
                 )
         return None
+
+    def verify_handshake_onchain(
+        self, miner_hotkey: str, patch_hash: str, nonce: str
+    ) -> tuple[bool, str]:
+        """Verify the handshake against the miner's LIVE on-chain commitment.
+
+        Reads the miner's commitment via subtensor.get_commitment(netuid, uid)
+        and compares it to the hash reconstructed from this submission. This is
+        the real chain query — unlike the local handshakes.jsonl lookup, it works
+        for any external miner whose commit lives on the actual chain. Note that
+        set_commitment overwrites per submission, so the submission's nonce must
+        match the miner's most-recent commitment.
+        """
+        uid = self.get_uid(miner_hotkey)
+        if uid is None:
+            return False, "hotkey not registered on subnet"
+        try:
+            committed = self.subtensor.get_commitment(netuid=self.netuid, uid=uid)
+        except Exception as e:
+            return False, f"get_commitment failed: {type(e).__name__}: {e}"
+        if not committed:
+            return False, "no on-chain handshake commitment for this hotkey"
+        expected = handshake_commit_hash(miner_hotkey, patch_hash or "", nonce)
+        if str(committed).strip().lower() != expected.lower():
+            return False, (
+                f"on-chain commitment mismatch (chain={str(committed)[:16]}, "
+                f"expected={expected[:16]})"
+            )
+        return True, "handshake verified on-chain"
 
     def is_hotkey_registered(self, hotkey: str) -> bool:
         """Check if a hotkey is registered on the subnet's metagraph."""
