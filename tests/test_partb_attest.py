@@ -6,8 +6,13 @@ finalized + golden-fixture-tested against the miner's real CC-hardware bundles.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+
+import pytest
 
 from proof import real_attest as RA
+
+_HAS_DCAP = importlib.util.find_spec("dcap_qvl") is not None
 
 
 # --------------------------------------------------------- build_user_data
@@ -78,3 +83,78 @@ def test_verify_tdx_quote_rejects_fake_on_mainnet(monkeypatch):
 def test_verify_tdx_quote_empty():
     ok, detail = RA.verify_tdx_quote("", "0xn", "ud")
     assert not ok and "empty" in detail.lower()
+
+
+# ----------------------------- production path (dcap-qvl faked, no network)
+# These exercise the real (non-stub) branch and pin two API contracts that a
+# junk-quote test can't reach (it dies at parse_quote): get_collateral_and_verify
+# is async (must be awaited) and is_tdx is a method (must be called).
+class _FakeReport:
+    def __init__(self, report_data):
+        self.report_data = report_data
+        self.mr_td = b"\xab" * 48
+
+
+class _FakeQuote:
+    def __init__(self, report_data, tdx=True):
+        self.report = _FakeReport(report_data)
+        self._tdx = tdx
+
+    def is_tdx(self):  # real dcap-qvl exposes is_tdx as a METHOD
+        return self._tdx
+
+
+class _FakeVR:
+    def __init__(self, status="UpToDate"):
+        self.status = status
+        self.advisory_ids = []
+
+
+def _patch_dcap(monkeypatch, *, report_data, tdx=True, status="UpToDate"):
+    import dcap_qvl
+    monkeypatch.delenv("RALPH_ALLOW_REAL_ATTEST_STUB", raising=False)
+    monkeypatch.setattr(dcap_qvl, "parse_quote", lambda b: _FakeQuote(report_data, tdx=tdx))
+
+    async def _gcv(b, pccs_url=None):  # async, like the real one
+        return _FakeVR(status)
+
+    monkeypatch.setattr(dcap_qvl, "get_collateral_and_verify", _gcv)
+
+
+def _bound_rd(nonce, ud):
+    return hashlib.sha256((nonce + ud).encode()).digest() + b"\x00" * 32  # 32 binding + 32 zero tail
+
+
+@pytest.mark.skipif(not _HAS_DCAP, reason="dcap-qvl not installed")
+def test_verify_tdx_quote_production_accepts_bound_quote(monkeypatch):
+    # Fails if get_collateral_and_verify is not awaited (a coroutine has no .status).
+    nonce, ud = "0x" + "11" * 32, RA.build_user_data("cm", "roll", "0x" + "11" * 32)
+    _patch_dcap(monkeypatch, report_data=_bound_rd(nonce, ud), tdx=True, status="UpToDate")
+    ok, detail = RA.verify_tdx_quote("00" * 300, nonce, ud)
+    assert ok, detail
+
+
+@pytest.mark.skipif(not _HAS_DCAP, reason="dcap-qvl not installed")
+def test_verify_tdx_quote_production_rejects_non_tdx(monkeypatch):
+    # Fails if is_tdx is read as a bare attribute (a bound method is always truthy).
+    nonce, ud = "0x" + "11" * 32, RA.build_user_data("cm", "roll", "0x" + "11" * 32)
+    _patch_dcap(monkeypatch, report_data=_bound_rd(nonce, ud), tdx=False)
+    ok, detail = RA.verify_tdx_quote("00" * 300, nonce, ud)
+    assert not ok and "tdx" in detail.lower()
+
+
+@pytest.mark.skipif(not _HAS_DCAP, reason="dcap-qvl not installed")
+def test_verify_tdx_quote_production_rejects_bad_tcb(monkeypatch):
+    nonce, ud = "0x" + "11" * 32, RA.build_user_data("cm", "roll", "0x" + "11" * 32)
+    _patch_dcap(monkeypatch, report_data=_bound_rd(nonce, ud), status="OutOfDate")
+    ok, detail = RA.verify_tdx_quote("00" * 300, nonce, ud)
+    assert not ok and "tcb" in detail.lower()
+
+
+@pytest.mark.skipif(not _HAS_DCAP, reason="dcap-qvl not installed")
+def test_verify_tdx_quote_production_rejects_unbound_report_data(monkeypatch):
+    nonce, ud = "0x" + "11" * 32, RA.build_user_data("cm", "roll", "0x" + "11" * 32)
+    wrong = hashlib.sha256(b"different").digest() + b"\x00" * 32
+    _patch_dcap(monkeypatch, report_data=wrong, status="UpToDate")
+    ok, detail = RA.verify_tdx_quote("00" * 300, nonce, ud)
+    assert not ok and "report_data" in detail.lower()

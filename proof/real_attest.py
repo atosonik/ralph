@@ -614,6 +614,7 @@ def verify_tdx_quote(
     still checks the report_data binding, so a quote from a different submission
     / nonce is rejected even in stub mode.
     """
+    import asyncio
     import hashlib as _hl
     import os as _os
 
@@ -661,12 +662,14 @@ def verify_tdx_quote(
         quote = dcap_qvl.parse_quote(quote_bytes)
     except Exception as e:
         return False, f"TDX quote parse failed: {e}"
-    if not quote.is_tdx:
+    if not quote.is_tdx():  # is_tdx is a method; bare attribute is always truthy
         return False, "not a TDX quote (SGX/other tee rejected)"
 
     # Verify the quote's signature chain to Intel's roots + TCB status.
+    # get_collateral_and_verify is async (it fetches collateral over the
+    # network), so it must be run to completion, not called bare.
     try:
-        vr = dcap_qvl.get_collateral_and_verify(quote_bytes)
+        vr = asyncio.run(dcap_qvl.get_collateral_and_verify(quote_bytes))
     except Exception as e:
         return False, f"TDX DCAP verification failed: {e}"
     status = str(getattr(vr, "status", "")).upper()
