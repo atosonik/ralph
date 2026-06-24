@@ -7,7 +7,10 @@ into `queue/pending/<bundle_hash>/` where the existing local-queue logic
 picks them up.
 
 State is tracked in queue/hf_state.json so we don't re-download already-
-processed bundles after restarts.
+processed bundles after restarts. Each processed bundle is stamped with the
+VALIDATOR_VERSION it was judged under; on a version bump, older-version entries
+are reprocessed (re-downloaded + re-validated) so evaluation stays fair across
+a logic upgrade.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+from validator.version import VALIDATOR_VERSION
+
 DEFAULT_REPO = "RalphLabsAI/proof-bundles"
 
 
@@ -25,14 +30,31 @@ def _state_path(queue_dir: Path) -> Path:
     return queue_dir / "hf_state.json"
 
 
+def _migrate_state(raw: dict) -> dict:
+    """Normalise to {"validator_version": str, "processed": {bundle_id: version}}.
+
+    Legacy state stored `processed` as a flat list of bundle_ids with no version;
+    those are mapped to "legacy" so they re-process under the current version.
+    """
+    processed = raw.get("processed", {})
+    if isinstance(processed, list):
+        processed = {bid: "legacy" for bid in processed}
+    elif not isinstance(processed, dict):
+        processed = {}
+    return {
+        "validator_version": raw.get("validator_version", "legacy"),
+        "processed": processed,
+    }
+
+
 def _load_state(queue_dir: Path) -> dict:
     p = _state_path(queue_dir)
     if not p.exists():
-        return {"processed": []}
+        return {"validator_version": VALIDATOR_VERSION, "processed": {}}
     try:
-        return json.loads(p.read_text())
+        return _migrate_state(json.loads(p.read_text()))
     except Exception:
-        return {"processed": []}
+        return {"validator_version": VALIDATOR_VERSION, "processed": {}}
 
 
 def _save_state(queue_dir: Path, state: dict) -> None:
@@ -40,8 +62,13 @@ def _save_state(queue_dir: Path, state: dict) -> None:
 
 
 def list_remote_submissions(repo_id: str, token: Optional[str] = None) -> list[dict]:
-    """Return the open HF PRs against the dataset, each as a dict with
-    bundle_id (= directory prefix under submissions/), pr_num, git_ref."""
+    """Return the open HF PRs against the dataset, oldest-first.
+
+    Each entry is a dict with bundle_id (= directory prefix under submissions/),
+    pr_num, git_ref, and created_at (ISO-8601 PR creation time). Ordering is
+    by created_at then pr_num so validation is first-come-first-served (fair),
+    not by bundle-hash lexical order.
+    """
     from huggingface_hub import HfApi
 
     api = HfApi(token=token)
@@ -66,9 +93,16 @@ def list_remote_submissions(repo_id: str, token: Optional[str] = None) -> list[d
         except Exception as e:
             print(f"[hf_poller] list PR #{d.num} files failed: {e}")
             continue
+        created_at = d.created_at.isoformat() if getattr(d, "created_at", None) else None
         bundle_ids = {f.split("/")[1] for f in files if f.startswith("submissions/") and len(f.split("/")) >= 3}
         for bid in bundle_ids:
-            pending.append({"bundle_id": bid, "pr_num": d.num, "git_ref": ref})
+            pending.append(
+                {"bundle_id": bid, "pr_num": d.num, "git_ref": ref, "created_at": created_at}
+            )
+
+    # First-come-first-validate: oldest PR first. created_at is ISO-8601 UTC so
+    # lexical order is chronological; pr_num breaks ties / covers a missing time.
+    pending.sort(key=lambda p: (p["created_at"] or "", p["pr_num"]))
     return pending
 
 
@@ -79,6 +113,7 @@ def download_one(
     token: Optional[str] = None,
     git_ref: str = "main",
     pr_num: int | None = None,
+    created_at: str | None = None,
 ) -> bool:
     """Download all files for one bundle into dest_dir/<bundle_id>/.
 
@@ -161,7 +196,12 @@ def download_one(
     # Annotate which PR this came from so the validator can merge later.
     if pr_num is not None:
         (out / ".hf_pr.json").write_text(json.dumps(
-            {"pr_num": pr_num, "git_ref": git_ref, "repo_id": "RalphLabsAI/proof-bundles"},
+            {
+                "pr_num": pr_num,
+                "git_ref": git_ref,
+                "repo_id": "RalphLabsAI/proof-bundles",
+                "created_at": created_at,
+            },
             indent=2,
         ))
     return True
@@ -182,13 +222,18 @@ def poll_hub(
     pending.mkdir(parents=True, exist_ok=True)
 
     state = _load_state(queue_dir)
-    processed = set(state.get("processed", []))
+    processed = state.get("processed", {})  # {bundle_id: validator_version}
 
-    remote_prs = list_remote_submissions(repo_id, token=token)
+    # A bundle counts as done only if it was judged by the CURRENT validator
+    # version. Entries from an older version are reprocessed: not in `done` →
+    # re-downloaded → re-judged → re-stamped below.
+    done = {bid for bid, ver in processed.items() if ver == VALIDATOR_VERSION}
+
+    remote_prs = list_remote_submissions(repo_id, token=token)  # oldest-first
     if not remote_prs:
         return []
 
-    new = [p for p in remote_prs if p["bundle_id"] not in processed]
+    new = [p for p in remote_prs if p["bundle_id"] not in done]
     if not new:
         return []
 
@@ -200,13 +245,15 @@ def poll_hub(
         bid = sub["bundle_id"]
         print(f"[hf_poller] downloading {bid} from PR #{sub['pr_num']} ({sub['git_ref']})...")
         if download_one(bid, repo_id, pending, token=token,
-                        git_ref=sub["git_ref"], pr_num=sub["pr_num"]):
+                        git_ref=sub["git_ref"], pr_num=sub["pr_num"],
+                        created_at=sub.get("created_at")):
             downloaded.append(bid)
-            processed.add(bid)
+            processed[bid] = VALIDATOR_VERSION
         else:
             print(f"[hf_poller] skipped {bid} (download failed)")
 
-    state["processed"] = sorted(processed)
+    state["validator_version"] = VALIDATOR_VERSION
+    state["processed"] = processed
     _save_state(queue_dir, state)
     return downloaded
 
