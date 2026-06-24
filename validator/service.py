@@ -143,6 +143,46 @@ def archive_bundle(bundle_dir: Path, queue_dir: Path, dest: str) -> None:
     shutil.move(str(bundle_dir), str(target))
 
 
+def _close_losing_prs(bundle_dir: Path, reason: str) -> None:
+    """Close the HF (and GitHub recipe) PRs for a non-crowned submission so the
+    repos don't accumulate open losing PRs. A king change MERGES its PRs instead
+    and never reaches here. Call BEFORE archive_bundle (reads files in-place).
+
+    Opt out with RALPH_CLOSE_LOSING_PRS=0. Best-effort — never raises, never
+    affects scoring or weights.
+    """
+    if os.environ.get("RALPH_CLOSE_LOSING_PRS", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return
+    note = f"Closed by Ralph validator — not crowned: {reason}."
+    # HF dataset PR (mapping written into .hf_pr.json at download time).
+    try:
+        hf_path = bundle_dir / ".hf_pr.json"
+        if hf_path.exists():
+            info = json.loads(hf_path.read_text(encoding="utf-8", errors="replace"))
+            tok = os.environ.get("RALPH_BOT_HF_TOKEN") or os.environ.get("HF_TOKEN", "")
+            if tok and info.get("pr_num"):
+                from validator.hf_bot import close_pr as _hf_close
+                ok, detail = _hf_close(
+                    repo_id=info.get("repo_id", "RalphLabsAI/proof-bundles"),
+                    pr_num=info["pr_num"], token=tok, comment=note,
+                )
+                log_info(f"  HF PR #{info['pr_num']} {'closed' if ok else 'close failed'}: {detail}")
+    except Exception as e:
+        log_warn(f"HF PR close skipped for {bundle_dir.name}: {e}")
+    # GitHub recipe PR (from submission.json pr_url; often empty → no-op).
+    try:
+        sub_path = bundle_dir / "submission.json"
+        if sub_path.exists():
+            pr_url = json.loads(sub_path.read_text(encoding="utf-8", errors="replace")).get("pr_url", "")
+            tok = os.environ.get("RALPH_BOT_GH_TOKEN", "")
+            if tok and pr_url:
+                from validator.github_bot import close_pr as _gh_close
+                ok, detail = _gh_close(pr_url, tok, comment=note)
+                log_info(f"  GitHub PR {pr_url} {'closed' if ok else 'close failed'}: {detail}")
+    except Exception as e:
+        log_warn(f"GitHub PR close skipped for {bundle_dir.name}: {e}")
+
+
 def _verify_pr_if_required(result, bundle_dir: Path) -> tuple[bool, str]:
     """If $RALPH_BOT_GH_TOKEN is set and the submission carries a pr_url,
     verify the PR's diff is byte-equal to the bundle's patch.diff.
@@ -589,6 +629,7 @@ def run_epoch(
         except Exception as e:
             log_err(f"error scoring {bundle_id}: {e}")
             log_debug(traceback.format_exc())
+            _close_losing_prs(bundle_dir, f"scoring error: {e}")
             archive_bundle(bundle_dir, queue_dir, "rejected")
             epoch_results["rejected"] += 1
             chain.append_event({
@@ -601,6 +642,7 @@ def run_epoch(
 
         if result["status"] == "rejected":
             log_warn(f"rejected {bundle_id}: {result['reason']}")
+            _close_losing_prs(bundle_dir, result["reason"])
             archive_bundle(bundle_dir, queue_dir, "rejected")
             epoch_results["rejected"] += 1
             chain.append_event({
@@ -619,6 +661,7 @@ def run_epoch(
         # and stops the §5.7 audit dispatcher from wasting time.
         if not chain.is_hotkey_registered(miner_hotkey):
             log_warn(f"rejected {bundle_id}: miner hotkey {miner_hotkey[:16]}... not registered")
+            _close_losing_prs(bundle_dir, "miner hotkey not registered on subnet")
             archive_bundle(bundle_dir, queue_dir, "rejected")
             epoch_results["rejected"] += 1
             chain.append_event({
@@ -639,6 +682,7 @@ def run_epoch(
         if (val_bpb is None or not _math.isfinite(val_bpb)
                 or bench_acc is None or not _math.isfinite(bench_acc)):
             log_warn(f"rejected {bundle_id}: non-finite metrics (val_bpb={val_bpb}, bench={bench_acc})")
+            _close_losing_prs(bundle_dir, "non-finite metrics")
             archive_bundle(bundle_dir, queue_dir, "rejected")
             epoch_results["rejected"] += 1
             chain.append_event({
@@ -705,6 +749,11 @@ def run_epoch(
                 f"MEANINGFUL FAILURE: {who} val_bpb={result['val_bpb']:.4f} "
                 f"(king {king_bpb_str}); rationale archived to corpus, "
                 f"will get equal share of 10% pool"
+            )
+            _close_losing_prs(
+                bundle_dir,
+                f"meaningful failure — credited (10% pool), not crowned "
+                f"(val_bpb {result['val_bpb']:.4f} vs king {king_bpb_str})",
             )
             archive_bundle(bundle_dir, queue_dir, "meaningful_failure")
             epoch_results.setdefault("meaningful_failures", 0)
@@ -924,6 +973,7 @@ def run_epoch(
                     log_warn(f"king changed but no HF token to merge PR #{hf_pr['pr_num']}")
         else:
             log_info(f"below threshold: {miner_hotkey[:20]}... gain={result['quality_gain']:+.4f}")
+            _close_losing_prs(bundle_dir, f"below threshold (gain {result['quality_gain']:+.4f})")
 
         archive_bundle(bundle_dir, queue_dir, "scored")
 

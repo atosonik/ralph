@@ -50,3 +50,30 @@ def merge_pr(
         return HfMergeResult(pr_num=pr_num, merged=True, detail="merged")
     except Exception as e:
         return HfMergeResult(pr_num=pr_num, merged=False, detail=f"merge failed: {e}")
+
+
+def close_pr(
+    repo_id: str,
+    pr_num: int,
+    token: str,
+    comment: str | None = None,
+    repo_type: str = "dataset",
+) -> tuple[bool, str]:
+    """Close (not merge) a losing HF dataset PR, posting a reason comment.
+
+    Best-effort — returns (ok, detail), never raises. Used to stop non-crowned
+    submission PRs from piling up open on the dataset repo.
+    """
+    from huggingface_hub import HfApi
+    api = HfApi(token=token)
+    try:
+        api.change_discussion_status(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            discussion_num=pr_num,
+            new_status="closed",
+            comment=comment or "Closed by Ralph validator (not crowned).",
+        )
+        return True, "closed"
+    except Exception as e:
+        return False, f"close failed: {e}"

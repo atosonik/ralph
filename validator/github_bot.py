@@ -60,6 +60,27 @@ def _parse_pr_url(pr_url: str) -> tuple[str, str, int]:
     return m.group(1), m.group(2), int(m.group(3))
 
 
+def close_pr(pr_url: str, token: str, comment: str | None = None) -> tuple[bool, str]:
+    """Close (not merge) a losing recipe PR, posting a reason comment first.
+
+    Best-effort — returns (ok, detail), never raises. No-ops on an empty pr_url
+    (many submissions don't link a recipe PR).
+    """
+    if not pr_url:
+        return False, "no pr_url"
+    try:
+        owner, repo, num = _parse_pr_url(pr_url)
+    except ValueError as e:
+        return False, str(e)
+    try:
+        if comment:
+            _gh("POST", f"/repos/{owner}/{repo}/issues/{num}/comments", token, {"body": comment})
+        _gh("PATCH", f"/repos/{owner}/{repo}/pulls/{num}", token, {"state": "closed"})
+        return True, "closed"
+    except Exception as e:
+        return False, f"close failed: {e}"
+
+
 # Real GitHub handle rules: 1–39 chars, ASCII alphanumerics or hyphen.
 # (GitHub additionally disallows leading/trailing hyphens, but we keep the
 # regex strict-but-simple here; the practical attack we block is newlines,
