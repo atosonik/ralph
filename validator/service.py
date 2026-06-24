@@ -134,6 +134,14 @@ def poll_queue(queue_dir: Path) -> list[Path]:
     return bundles
 
 
+def _safe_current_block(chain) -> int:
+    """Current block height, or 0 if it can't be read (best-effort)."""
+    try:
+        return int(chain.get_current_block())
+    except Exception:
+        return 0
+
+
 def archive_bundle(bundle_dir: Path, queue_dir: Path, dest: str) -> None:
     """Move a processed bundle to scored/ or rejected/."""
     target = queue_dir / dest / bundle_dir.name
@@ -797,11 +805,34 @@ def run_epoch(
             continue
 
         if result["accepted"]:
+            from chain_layer.interface import KingRecord
+            king_before = chain.get_king()
+
+            # KING TENURE GUARD: a freshly-crowned king must reign a minimum
+            # number of blocks (RALPH_KING_MIN_TENURE_BLOCKS, default 300 — just
+            # under sn40's ~360-block weight-set window) so it earns at least
+            # one weight cycle before it can be dethroned. A challenger arriving
+            # inside the incumbent's tenure is DEFERRED: left in queue/pending
+            # (not archived, not crowned) and re-evaluated in a later epoch once
+            # tenure lapses. crowned_at_block == 0 means legacy/unknown → no
+            # protection (the bundle is crowned normally).
+            if king_before is not None and getattr(king_before, "crowned_at_block", 0):
+                tenure = int(os.environ.get("RALPH_KING_MIN_TENURE_BLOCKS", "300"))
+                try:
+                    age = chain.get_current_block() - king_before.crowned_at_block
+                except Exception:
+                    age = tenure  # can't read block → don't block dethroning
+                if age < tenure:
+                    log_info(
+                        f"king {king_before.miner_hotkey[:12]}… in protected tenure "
+                        f"({age}/{tenure} blocks) — deferring challenger "
+                        f"{miner_hotkey[:12]}… (left pending, re-evaluated later)"
+                    )
+                    continue  # do NOT crown, do NOT archive — re-eval next epoch
+
             gh = result.get("miner_github", "")
             who = f"{gh} ({miner_hotkey[:12]}...)" if gh else f"{miner_hotkey[:20]}..."
             log_info(f"NEW KING: {who} val_bpb={result['val_bpb']:.4f}")
-            from chain_layer.interface import KingRecord
-            king_before = chain.get_king()
             new_king = KingRecord(
                 miner_hotkey=miner_hotkey,
                 bundle_hash=result["bundle_hash"],
@@ -809,6 +840,7 @@ def run_epoch(
                 benchmark_accuracy=result["benchmark_accuracy"],
                 compute_cost=result["score_report"].compute_cost,
                 crowned_at=time.time(),
+                crowned_at_block=_safe_current_block(chain),
                 # proof_dir is updated AFTER archive_bundle moves the
                 # bundle to scored/, so the king pointer survives the move.
                 proof_dir=str(queue_dir / "scored" / bundle_dir.name),
