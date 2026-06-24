@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -24,6 +25,38 @@ from typing import Optional
 from validator.version import VALIDATOR_VERSION
 
 DEFAULT_REPO = "RalphLabsAI/proof-bundles"
+
+# miner.hub titles every submission PR "Submit proof bundle <hash[:12]>".
+_TITLE_HASH_RE = re.compile(r"Submit proof bundle ([0-9a-f]{6,})", re.IGNORECASE)
+
+
+def _submission_dirs(files: list[str]) -> set[str]:
+    """Set of submissions/<bundle_id>/ directory ids present in a file listing."""
+    return {
+        f.split("/")[1]
+        for f in files
+        if f.startswith("submissions/") and len(f.split("/")) >= 3
+    }
+
+
+def _pr_own_bundles(title: str, pr_dirs: set[str], main_dirs: set[str]) -> list[str]:
+    """Identify the bundle dir(s) a PR actually introduces.
+
+    list_repo_files(revision="refs/pr/N") returns the *cumulative* tree (the
+    base main at PR-open time + the PR's added files), so the raw dir set is not
+    the PR's own bundle. Primary signal: the PR title (`Submit proof bundle
+    <hash12>`, set by miner.hub) — match its hash prefix to a dir at the PR ref.
+    Fallback (non-standard title): dirs present at the ref but not on main.
+    The fallback is avoided when the title parses, so a bundle deleted from main
+    (e.g. a reverted mock) can't be mis-attributed to a later PR.
+    """
+    m = _TITLE_HASH_RE.search(title or "")
+    if m:
+        prefix = m.group(1).lower()
+        matches = sorted(d for d in pr_dirs if d.lower().startswith(prefix))
+        if matches:
+            return matches
+    return sorted(pr_dirs - main_dirs)
 
 
 def _state_path(queue_dir: Path) -> Path:
@@ -65,9 +98,10 @@ def list_remote_submissions(repo_id: str, token: Optional[str] = None) -> list[d
     """Return the open HF PRs against the dataset, oldest-first.
 
     Each entry is a dict with bundle_id (= directory prefix under submissions/),
-    pr_num, git_ref, and created_at (ISO-8601 PR creation time). Ordering is
-    by created_at then pr_num so validation is first-come-first-served (fair),
-    not by bundle-hash lexical order.
+    pr_num, git_ref, and created_at (ISO-8601 PR creation time). Only the bundle
+    a PR actually *adds* is attributed to it (see _pr_own_bundles), not the whole
+    cumulative tree the PR ref exposes. Ordering is by created_at then pr_num so
+    validation is first-come-first-served (fair), not bundle-hash lexical order.
     """
     from huggingface_hub import HfApi
 
@@ -78,15 +112,20 @@ def list_remote_submissions(repo_id: str, token: Optional[str] = None) -> list[d
         print(f"[hf_poller] get_repo_discussions failed: {e}")
         return []
 
+    # Bundles already on main are the baseline a PR's tree is layered on top of;
+    # used only as the fallback when a PR title doesn't carry the bundle hash.
+    try:
+        main_dirs = _submission_dirs(api.list_repo_files(repo_id, repo_type="dataset"))
+    except Exception as e:
+        print(f"[hf_poller] list main files failed: {e}")
+        main_dirs = set()
+
     pending = []
     for d in discussions:
         if not d.is_pull_request:
             continue
         if d.status != "open":
             continue
-        # Each PR has a git_reference like 'refs/pr/3'. Files under
-        # submissions/<bundle_id>/ are what we want; find the bundle_id by
-        # listing the PR's commit tree.
         ref = d.git_reference  # e.g. "refs/pr/3"
         try:
             files = api.list_repo_files(repo_id, repo_type="dataset", revision=ref)
@@ -94,8 +133,13 @@ def list_remote_submissions(repo_id: str, token: Optional[str] = None) -> list[d
             print(f"[hf_poller] list PR #{d.num} files failed: {e}")
             continue
         created_at = d.created_at.isoformat() if getattr(d, "created_at", None) else None
-        bundle_ids = {f.split("/")[1] for f in files if f.startswith("submissions/") and len(f.split("/")) >= 3}
-        for bid in bundle_ids:
+        own = _pr_own_bundles(d.title, _submission_dirs(files), main_dirs)
+        if not own:
+            print(f"[hf_poller] PR #{d.num}: no own bundle identified (title={d.title!r}); skipping")
+            continue
+        if len(own) > 1:
+            print(f"[hf_poller] PR #{d.num}: multiple candidate bundles {own}; taking all")
+        for bid in own:
             pending.append(
                 {"bundle_id": bid, "pr_num": d.num, "git_ref": ref, "created_at": created_at}
             )
