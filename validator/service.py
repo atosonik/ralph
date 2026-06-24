@@ -35,6 +35,7 @@ import signal
 import sys
 import time
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -96,14 +97,40 @@ signal.signal(signal.SIGINT, _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
 
 
+def _submission_time_key(d: Path) -> tuple:
+    """Sort key for first-come-first-validate ordering.
+
+    Orders by the submission's HF PR creation time (from .hf_pr.json), falling
+    back to the directory mtime for local/legacy bundles without PR metadata.
+    Previously bundles were sorted by directory name (= bundle hash), which is
+    arbitrary w.r.t. submission time and so unfair.
+    """
+    info_path = d / ".hf_pr.json"
+    if info_path.exists():
+        try:
+            info = json.loads(info_path.read_text())
+            created = info.get("created_at")
+            if created:
+                ts = datetime.fromisoformat(created).timestamp()
+                return (ts, info.get("pr_num") or 0, d.name)
+        except Exception:
+            pass
+    try:
+        ts = d.stat().st_mtime
+    except OSError:
+        ts = 0.0
+    return (ts, 0, d.name)
+
+
 def poll_queue(queue_dir: Path) -> list[Path]:
-    """Return paths to pending submission bundles, oldest first."""
+    """Return paths to pending submission bundles, oldest (first-submitted) first."""
     pending = queue_dir / "pending"
     pending.mkdir(parents=True, exist_ok=True)
     bundles = []
-    for d in sorted(pending.iterdir()):
+    for d in pending.iterdir():
         if d.is_dir() and (d / "submission.json").exists():
             bundles.append(d)
+    bundles.sort(key=_submission_time_key)
     return bundles
 
 

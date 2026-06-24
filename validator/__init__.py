@@ -16,6 +16,7 @@ from .validator import (
     ValidatorResult,
     judge_submission,
 )
+from .version import VALIDATOR_VERSION
 
 __all__ = [
     "ValidatorResult",
@@ -23,4 +24,5 @@ __all__ = [
     "judge_submission",
     "ScoreReport",
     "score_bundle",
+    "VALIDATOR_VERSION",
 ]
