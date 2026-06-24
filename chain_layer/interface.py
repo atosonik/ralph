@@ -49,6 +49,10 @@ class KingRecord:
     compute_cost: float
     crowned_at: float
     proof_dir: Optional[str] = None
+    # Block height at which this king was crowned. Enforces a minimum reign
+    # (RALPH_KING_MIN_TENURE_BLOCKS) so a new king earns ≥1 weight cycle before
+    # it can be dethroned. 0 = legacy/unknown (treated as no protection).
+    crowned_at_block: int = 0
     previous_king: Optional[dict] = None
     king_attestation_hash: str = ""
     parent_king_attestation_hash: Optional[str] = None

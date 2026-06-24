@@ -96,6 +96,7 @@ class LocalChain(ChainInterface):
             benchmark_accuracy=d.get("benchmark_accuracy", 0.0),
             compute_cost=d.get("compute_cost_h100h", 0.0),
             crowned_at=d.get("crowned_at", 0.0),
+            crowned_at_block=d.get("crowned_at_block", 0),
             proof_dir=d.get("proof_dir"),
             previous_king=d.get("previous_king"),
             king_attestation_hash=d.get("king_attestation_hash", ""),
@@ -110,6 +111,7 @@ class LocalChain(ChainInterface):
             "benchmark_accuracy": king.benchmark_accuracy,
             "compute_cost_h100h": king.compute_cost,
             "crowned_at": king.crowned_at,
+            "crowned_at_block": king.crowned_at_block,
             "proof_dir": king.proof_dir,
         }
         if king.previous_king:
