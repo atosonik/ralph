@@ -522,6 +522,40 @@ KING_POOL_FRACTION = 0.9
 MEANINGFUL_FAILURE_POOL_FRACTION = 0.1
 
 
+def _require_merged_king_pr() -> bool:
+    """Opt-in policy: when setting weights, only emit to a king whose GitHub
+    recipe PR is MERGED.
+
+    The crown-time PR check (_verify_pr_if_required) is NOT re-applied at
+    weight-set time, so a king crowned under a relaxed/transient config (e.g.
+    RALPH_REQUIRE_GH_PR=0, or a crown whose auto-merge never landed) keeps
+    earning emission forever. Enable on mainnet with
+    RALPH_REQUIRE_MERGED_KING_PR=1 (mirrors RALPH_REQUIRE_GH_PR / RALPH_ALLOW_*).
+    """
+    return os.environ.get("RALPH_REQUIRE_MERGED_KING_PR", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _king_pr_merged(chain) -> bool:
+    """True iff the sitting king's recipe PR is merged.
+
+    Reads pr_url from the king's proof_dir/submission.json and checks GitHub
+    with RALPH_BOT_GH_TOKEN. Fail closed: a missing king / pr_url / token, or any
+    API error, returns False so an unverifiable king is not weighted.
+    """
+    king = chain.get_king()
+    if king is None:
+        return False
+    sub_path = Path(getattr(king, "proof_dir", "") or "") / "submission.json"
+    try:
+        pr_url = json.loads(sub_path.read_text(encoding="utf-8", errors="replace")).get("pr_url", "")
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        pr_url = ""
+    if not pr_url:
+        return False
+    from validator.github_bot import pr_is_merged
+    return pr_is_merged(pr_url, os.environ.get("RALPH_BOT_GH_TOKEN", ""))
+
+
 def _apply_pool_split(
     chain,
     king_change_hotkey: str | None,
@@ -542,6 +576,19 @@ def _apply_pool_split(
         king = chain.get_king()
         if king is not None:
             king_hotkey = king.miner_hotkey
+    # Weight-time integrity gate: a king must carry a MERGED recipe PR to keep
+    # earning emission. The crown-time check is not re-applied here, so without
+    # this a king crowned under a relaxed/transient config keeps the throne
+    # forever. When it trips we withhold ALL weight this epoch -> run_epoch's
+    # burn fallback emits nothing to the unvalidated king until a king with a
+    # merged PR is crowned. Opt-in via RALPH_REQUIRE_MERGED_KING_PR.
+    if king_hotkey and _require_merged_king_pr() and not _king_pr_merged(chain):
+        log_warn(
+            f"king {king_hotkey[:12]}… has no MERGED recipe PR — withholding all "
+            f"weight this epoch (RALPH_REQUIRE_MERGED_KING_PR); burning until a "
+            f"king with a merged PR is crowned"
+        )
+        return {}
     if not meaningful_failure_hotkeys:
         if king_hotkey:
             weights[king_hotkey] = 1.0
