@@ -535,14 +535,13 @@ def _require_merged_king_pr() -> bool:
     return os.environ.get("RALPH_REQUIRE_MERGED_KING_PR", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _king_pr_merged(chain) -> bool:
-    """True iff the sitting king's recipe PR is merged.
+def _king_record_pr_merged(king) -> bool:
+    """True iff the given king record's recipe PR is merged.
 
     Reads pr_url from the king's proof_dir/submission.json and checks GitHub
     with RALPH_BOT_GH_TOKEN. Fail closed: a missing king / pr_url / token, or any
-    API error, returns False so an unverifiable king is not weighted.
+    API error, returns False so an unverifiable king is never treated as valid.
     """
-    king = chain.get_king()
     if king is None:
         return False
     sub_path = Path(getattr(king, "proof_dir", "") or "") / "submission.json"
@@ -554,6 +553,57 @@ def _king_pr_merged(chain) -> bool:
         return False
     from validator.github_bot import pr_is_merged
     return pr_is_merged(pr_url, os.environ.get("RALPH_BOT_GH_TOKEN", ""))
+
+
+def _king_pr_merged(chain) -> bool:
+    """True iff the sitting king's recipe PR is merged (see _king_record_pr_merged)."""
+    return _king_record_pr_merged(chain.get_king())
+
+
+def _reinstate_valid_king(chain) -> None:
+    """Repair a throne already occupied by a king with no MERGED recipe PR.
+
+    Walks the king lineage newest -> oldest (each record's previous_king) and
+    reinstates the first ancestor whose PR IS merged. If none qualifies, clears
+    the throne so a fresh legitimately-merged submission can be crowned. The
+    weight gate alone only stops emission — without this an unbeatable squatter
+    (e.g. one sitting at the eval floor) blocks every challenger forever. No-op
+    unless RALPH_REQUIRE_MERGED_KING_PR is set; best-effort (never raises, a
+    failure here must not break the epoch).
+    """
+    if not _require_merged_king_pr():
+        return
+    try:
+        king = chain.get_king()
+        if king is None or _king_record_pr_merged(king):
+            return
+        from chain_layer.interface import KingRecord
+        node = king
+        while isinstance(node.previous_king, dict):
+            try:
+                node = KingRecord(**node.previous_king)
+            except TypeError:
+                break
+            if _king_record_pr_merged(node):
+                log_warn(
+                    f"sitting king {king.miner_hotkey[:12]}… has no merged recipe PR "
+                    f"— demoting to last valid king {node.miner_hotkey[:12]}…"
+                )
+                chain.set_king(node)
+                return
+        # No ancestor has a merged PR: clear the throne so the next legitimately
+        # merged submission is crowned (until then run_epoch burns).
+        chain_dir = getattr(chain, "chain_dir", None)
+        if chain_dir:
+            king_path = Path(chain_dir) / "king.json"
+            if king_path.exists():
+                king_path.unlink()
+                log_warn(
+                    f"sitting king {king.miner_hotkey[:12]}… has no merged recipe PR "
+                    f"and no valid ancestor — throne cleared (burning until a valid king)"
+                )
+    except Exception as e:
+        log_warn(f"king reinstatement check failed (throne unchanged): {e}")
 
 
 def _apply_pool_split(
@@ -634,6 +684,12 @@ def run_epoch(
     the weights on the next epoch without re-scoring the (now-archived)
     bundles.
     """
+    # Repair the throne BEFORE scoring/weighting: if the sitting king has no
+    # merged recipe PR, demote to the last valid ancestor (or clear it) so this
+    # epoch's challengers don't compare against an unbeatable invalid squatter.
+    # Opt-in via RALPH_REQUIRE_MERGED_KING_PR; no-op otherwise.
+    _reinstate_valid_king(chain)
+
     if hf_repo:
         try:
             new = poll_hub(queue_dir, repo_id=hf_repo, token=hf_token, limit=hf_limit)
