@@ -9,7 +9,8 @@ rather than silently passing. Do NOT copy the encoding here.
 
 Checks, all hard failures:
   * self-consistency: report_sha256(report_json) == envelope.report_sha256
-  * on-chain anchor:  == the hash committed on-chain at epoch_end_block
+  * on-chain anchor:  == the hash committed on-chain at chain_commitment_block
+                         (the block the validator's set_commitment landed at)
   * signature:        ed25519 valid for `signer_hotkey` over canonical bytes
 """
 

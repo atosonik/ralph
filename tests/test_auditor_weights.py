@@ -87,15 +87,30 @@ class _FakeChain:
     subtensor_url = "ws://x"
     netuid = 40
 
-    def __init__(self, blocks_since, current=1000):
+    def __init__(self, blocks_since, current=1000, tempo=None, blocks_left=None, rate_limit=None):
         self._bs = blocks_since
         self._cur = current
+        self._tempo = tempo
+        self._bl = blocks_left
+        self._rl = rate_limit
 
     def blocks_since_weight_set(self, hotkey):
         return self._bs
 
     def get_current_block(self):
         return self._cur
+
+    # tempo=None → maybe_counter_weight uses the flat-interval fallback (the path
+    # the cadence-flow tests below cover); set tempo/blocks_left/rate_limit to
+    # exercise the SN51 tempo-boundary path.
+    def tempo(self):
+        return self._tempo
+
+    def blocks_until_next_epoch(self):
+        return self._bl
+
+    def weights_rate_limit(self):
+        return self._rl
 
 
 class _FakeApi:
@@ -171,3 +186,48 @@ def test_counter_weight_due_but_no_clean_epoch(monkeypatch, tmp_path):
     api = _FakeApi()
     m.maybe_counter_weight(_FakeChain(blocks_since=500), api)
     assert not submitted and api.fetched == []
+
+
+# --- SN51 tempo-boundary path (tempo != None) ----------------------------
+# blocks_left is computed in-code from `current`: for netuid 40, tempo 360,
+# blocks_until_next_epoch(current) = 360 - (current+41) % 361. current=317 → 2
+# (in the lead window); current=1000 → 41 (far from the boundary).
+def test_counter_weight_sets_at_tempo_boundary(monkeypatch, tmp_path):
+    m, submitted = _wire(monkeypatch, tmp_path, enabled=True,
+                         hotkey="5Faudit", clean_epoch="40-123")
+    api = _FakeApi()
+    # current=317 → 2 blocks to boundary (≤ lead 2), no prior local set → sets
+    m.maybe_counter_weight(
+        _FakeChain(blocks_since=300, current=317, tempo=360, rate_limit=100), api)
+    assert submitted and api.fetched == ["40-123"]
+
+
+def test_counter_weight_double_set_guard(monkeypatch, tmp_path):
+    m, submitted = _wire(monkeypatch, tmp_path, enabled=True,
+                         hotkey="5Faudit", clean_epoch="40-123")
+    # at the boundary (current=318 → 1 block left) but we set just 3 blocks ago
+    # (.audit_published=315, 318-315=3 < floor 100), not stale → local guard SKIPs
+    (tmp_path / "pub").write_text("315")
+    m.maybe_counter_weight(
+        _FakeChain(blocks_since=300, current=318, tempo=360, rate_limit=100), _FakeApi())
+    assert not submitted
+
+
+def test_counter_weight_skips_far_from_boundary(monkeypatch, tmp_path):
+    m, submitted = _wire(monkeypatch, tmp_path, enabled=True,
+                         hotkey="5Faudit", clean_epoch="40-123")
+    # current=1000 → 41 blocks to boundary (> lead 2) → not due
+    m.maybe_counter_weight(
+        _FakeChain(blocks_since=200, current=1000, tempo=360, rate_limit=100), _FakeApi())
+    assert not submitted
+
+
+def test_counter_weight_deadman_sets_far_from_boundary(monkeypatch, tmp_path):
+    m, submitted = _wire(monkeypatch, tmp_path, enabled=True,
+                         hotkey="5Faudit", clean_epoch="40-123")
+    # far from boundary (current=1000 → 41) but > 2 tempos since last set
+    # (800 > 720) → dead-man fires and is exempt from the double-set guard
+    (tmp_path / "pub").write_text("999")  # would block, but dead-man overrides
+    m.maybe_counter_weight(
+        _FakeChain(blocks_since=800, current=1000, tempo=360, rate_limit=100), _FakeApi())
+    assert submitted

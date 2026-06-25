@@ -108,6 +108,43 @@ class ChainClient:
             return None
         return None if blocks is None else int(blocks)
 
+    def tempo(self) -> int | None:
+        """Subnet tempo (epoch length in blocks), or None on failure. Used to
+        time weight-sets ~`lead` blocks before the tempo (Yuma consensus)
+        boundary, SN51-style, instead of a flat block interval."""
+        sub = self._connect()
+        try:
+            t = sub.tempo(self.netuid)
+        except Exception:
+            try:
+                t = sub.query_subtensor("Tempo", params=[self.netuid]).value
+            except Exception:
+                return None
+        return None if t is None else int(t)
+
+    def blocks_until_next_epoch(self) -> int | None:
+        """Blocks remaining until this subnet's next tempo boundary, or None if
+        the tempo can't be read. Encapsulates the chain's `tempo - (block +
+        netuid + 1) % (tempo + 1)` boundary formula."""
+        t = self.tempo()
+        if t is None:
+            return None
+        from auditor.weights import blocks_until_next_epoch as _blocks_left
+        return _blocks_left(self.get_current_block(), self.netuid, t)
+
+    def weights_rate_limit(self) -> int | None:
+        """Subnet minimum gap (blocks) between weight-sets, or None on failure.
+        Used as a floor so the auditor never submits two sets inside the
+        rate-limit window (which the chain rejects)."""
+        sub = self._connect()
+        try:
+            return int(sub.weights_rate_limit(self.netuid))
+        except Exception:
+            try:
+                return int(sub.query_subtensor("WeightsSetRateLimit", params=[self.netuid]).value)
+            except Exception:
+                return None
+
     def close(self) -> None:
         sub = self._subtensor
         if sub is not None:
