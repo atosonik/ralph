@@ -13,6 +13,8 @@ active subset for repeatable tests.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -117,6 +119,19 @@ def _sealed_stream_manifest_hash(
     })
 
 
+def _synthetic_eval_allowed() -> bool:
+    """True iff the operator has explicitly opted into the synthetic-eval fallback.
+
+    OFF by default so a validator whose held-out shard / benchmark is missing
+    FAILS CLOSED instead of silently scoring every checkpoint against random
+    tokens + placeholder questions — which crowns the LEAST-trained model
+    (val_bpb ~3.9, benchmark_accuracy ~1.0 for anything). Mirrors the
+    RALPH_ALLOW_MOCK_ATTESTATION / RALPH_ALLOW_REAL_ATTEST_STUB pattern: set
+    RALPH_ALLOW_SYNTHETIC_EVAL=1 for CPU smoke / testnet only, never on mainnet.
+    """
+    return os.environ.get("RALPH_ALLOW_SYNTHETIC_EVAL") == "1"
+
+
 def run_hidden_eval(
     model: torch.nn.Module,
     eval_dir: Path | str,
@@ -124,14 +139,30 @@ def run_hidden_eval(
     bpb_batch_size: int = 8,
 ) -> HiddenEvalResult:
     eval_dir = Path(eval_dir)
+    allow_synthetic = _synthetic_eval_allowed()
+
     tokens_path = eval_dir / "active_tokens.bin"
     if tokens_path.exists():
         eval_tokens = load_eval_tokens(tokens_path)
-    else:
-        # Phase 0 fallback: synthesize a small reproducible eval token stream
-        # so the smoke test runs without a pre-built eval shard.
+    elif allow_synthetic:
+        # Opt-in reproducible synthetic stream (CPU smoke / testnet only) — never
+        # a silent default. See _synthetic_eval_allowed.
+        print(
+            f"[eval] WARNING: RALPH_ALLOW_SYNTHETIC_EVAL=1 — scoring val_bpb "
+            f"against a SYNTHETIC random token stream (no {tokens_path}). "
+            f"Testnet/CPU only; this must never run on mainnet.",
+            file=sys.stderr,
+        )
         rng = np.random.default_rng(424242)
         eval_tokens = rng.integers(0, 50257, size=4096, dtype=np.uint16)
+    else:
+        raise FileNotFoundError(
+            f"held-out eval stream not found: {tokens_path}. The validator will "
+            f"NOT fall back to random tokens — that silently scores every "
+            f"checkpoint against noise and crowns the least-trained model. "
+            f"Deploy the real held-out shard, or set RALPH_ALLOW_SYNTHETIC_EVAL=1 "
+            f"to opt into the reproducible synthetic stream (CPU smoke / testnet)."
+        )
 
     bpb_result = compute_val_bpb(
         model,
@@ -143,8 +174,21 @@ def run_hidden_eval(
     benchmark_path = eval_dir / "active_benchmark.json"
     if benchmark_path.exists():
         examples = json.loads(benchmark_path.read_text())
-    else:
+    elif allow_synthetic:
+        print(
+            f"[eval] WARNING: RALPH_ALLOW_SYNTHETIC_EVAL=1 — scoring benchmark "
+            f"against PLACEHOLDER examples (no {benchmark_path}); any model "
+            f"scores ~1.0. Testnet/CPU only.",
+            file=sys.stderr,
+        )
         examples = make_placeholder_examples(n=50)
+    else:
+        raise FileNotFoundError(
+            f"held-out benchmark not found: {benchmark_path}. The validator will "
+            f"NOT fall back to placeholder questions (any model scores ~1.0). "
+            f"Deploy the real benchmark mix, or set RALPH_ALLOW_SYNTHETIC_EVAL=1 "
+            f"(CPU smoke / testnet)."
+        )
 
     bench_result = compute_benchmark_score(model, examples)
 
