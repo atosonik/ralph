@@ -23,10 +23,13 @@ import os
 logger = logging.getLogger("ralph-auditor.weights")
 
 
-# Counter-weight cadence: a validator must keep setting weights every epoch or
-# its weights go stale and vTrust decays. The subnet enforces a minimum gap
-# (weights_rate_limit ≈ 100 blocks on netuid 40); we default comfortably above it.
-DEFAULT_WEIGHT_SET_INTERVAL_BLOCKS = 300  # ≈ 1h at 12s/block
+# Counter-weight cadence. Preferred mode (SN51-style): set weights ~`lead`
+# blocks BEFORE the subnet's tempo (Yuma consensus) boundary, so the auditor's
+# weights are maximally fresh exactly when consensus consumes them — the
+# strongest lever on vTrust=1.0. The flat block interval below is only the
+# fallback used when the subnet tempo can't be read.
+DEFAULT_WEIGHT_SET_INTERVAL_BLOCKS = 300  # fallback when tempo is unavailable
+DEFAULT_SET_LEAD_BLOCKS = 2  # set ~2 blocks before the tempo boundary (SN51)
 
 
 def is_enabled() -> bool:
@@ -65,6 +68,57 @@ def is_weight_set_due(blocks_since: int | None, interval_blocks: int) -> bool:
     if blocks_since is None:
         return True
     return blocks_since >= interval_blocks
+
+
+def set_lead_blocks() -> int:
+    """How many blocks before the tempo boundary to set weights (env
+    AUDITOR_SET_LEAD_BLOCKS, default 2). Negative/invalid → default."""
+    raw = os.environ.get("AUDITOR_SET_LEAD_BLOCKS", "").strip()
+    if raw:
+        try:
+            v = int(raw)
+            if v >= 0:
+                return v
+        except ValueError:
+            pass
+    return DEFAULT_SET_LEAD_BLOCKS
+
+
+def blocks_until_next_epoch(block: int, netuid: int, tempo: int) -> int:
+    """Blocks remaining until this subnet's next tempo (Yuma consensus) boundary,
+    using the chain's own boundary formula offset by netuid (identical to SN51):
+
+        blocks_left = tempo - (block + netuid + 1) % (tempo + 1)
+
+    Result is in [0, tempo]; 0 == on the boundary this block.
+    """
+    if tempo <= 0:
+        return 0
+    return tempo - (block + netuid + 1) % (tempo + 1)
+
+
+def is_weight_set_due_tempo(
+    blocks_left: int | None,
+    blocks_since: int | None,
+    tempo: int | None,
+    lead: int,
+) -> bool:
+    """SN51-style boundary timing for the auditor's counter-weight set.
+
+    Due when within `lead` blocks of the next tempo boundary, so the weights are
+    freshest when consensus evaluates them (best lever on vTrust=1.0). Plus two
+    safeties so vTrust can never decay:
+      - never-set yet (`blocks_since` None) → due immediately;
+      - dead-man: more than 2 full tempos since the last set → due regardless of
+        phase (covers a missed boundary / RPC gap).
+    """
+    if blocks_since is None:
+        return True
+    if tempo and blocks_since > tempo * 2:
+        return True
+    if blocks_left is not None and blocks_left <= lead:
+        return True
+    return False
 
 
 def auditor_hotkey_ss58() -> str | None:
@@ -236,10 +290,14 @@ def submit_weights(
 
 
 __all__ = [
+    "DEFAULT_SET_LEAD_BLOCKS",
     "DEFAULT_WEIGHT_SET_INTERVAL_BLOCKS",
     "auditor_hotkey_ss58",
+    "blocks_until_next_epoch",
     "is_enabled",
     "is_weight_set_due",
+    "is_weight_set_due_tempo",
+    "set_lead_blocks",
     "submit_burn_weights",
     "submit_weights",
     "weight_set_interval_blocks",

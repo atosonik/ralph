@@ -25,14 +25,18 @@ Env:
     VALIDATOR_HOTKEY      signer ss58 to read the on-chain commitment for
                           (default: the report's own signer_hotkey)
     HF_TOKEN              only for a private report repo (public needs none)
-    AUDIT_INTERVAL_SECONDS  --loop sleep (default 300)
+    AUDIT_INTERVAL_SECONDS  --loop: how often the Gates-1-3 audit pass runs (default 300)
     AUDITOR_SET_WEIGHTS_ENABLED  opt-in counter-weight (default off)
-    AUDITOR_WEIGHT_INTERVAL_BLOCKS  re-set weights every N blocks (default 300)
+    AUDITOR_WEIGHT_POLL_SECONDS  --loop poll cadence when counter-weighting (default 12 ≈ 1 block)
+    AUDITOR_SET_LEAD_BLOCKS  set weights this many blocks before the tempo boundary (default 2)
+    AUDITOR_WEIGHT_INTERVAL_BLOCKS  flat-cadence fallback when tempo can't be read (default 300)
 
-Counter-weight (when enabled) runs on a BLOCK cadence, not per-report: each pass
-reads how many blocks since the auditor's hotkey last set weights and re-sets
-from the latest clean epoch's replayed scores once ~300 blocks have elapsed, so
-the auditor-validator keeps its weights (and vTrust) fresh every epoch.
+Counter-weight (when enabled) is timed to the subnet TEMPO BOUNDARY, SN51-style:
+the --loop polls at block cadence and sets weights ~AUDITOR_SET_LEAD_BLOCKS before
+the next Yuma-consensus boundary, so the auditor-validator's weights are freshest
+exactly when consensus evaluates them (best lever on vTrust). It falls back to a
+flat block interval if the tempo can't be read, and a dead-man set (> 2 tempos
+since the last set) keeps vTrust from decaying if a boundary is ever missed.
 """
 
 from __future__ import annotations
@@ -122,7 +126,16 @@ def audit_epoch(epoch_id: str, chain: ChainClient, api: ReportClient) -> int:
         return EXIT_NETWORK
 
     report_json = envelope.get("report_json") or {}
-    end_block = report_json.get("epoch_end_block")
+    # The validator's set_commitment extrinsic lands a few blocks AFTER
+    # epoch_end_block (snapshot → hash → sign → commit), and commitments
+    # OVERWRITE, so the historical value is only readable at the block the commit
+    # actually landed (chain_commitment_block). Querying at epoch_end_block reads
+    # the PREVIOUS epoch's commitment → Gate 1 always fails → the auditor never
+    # advances its clean-epoch watermark. Fall back to epoch_end_block only for
+    # older reports that predate chain_commitment_block.
+    end_block = envelope.get("chain_commitment_block")
+    if end_block is None:
+        end_block = report_json.get("epoch_end_block")
     signer = envelope.get("signer_hotkey") or os.environ.get("VALIDATOR_HOTKEY") or None
 
     # Read the on-chain commitment at the historical block. A network failure
@@ -210,19 +223,24 @@ def audit_new_epochs(chain: ChainClient, api: ReportClient) -> int:
 
 
 def maybe_counter_weight(chain: ChainClient, api: ReportClient) -> None:
-    """Set the auditor's OWN weights on a block cadence (off unless enabled).
+    """Set the auditor's OWN weights, timed to the tempo boundary (off unless
+    enabled).
 
-    Continuous epoch-cadence process, NOT one-shot: each call reads how many
-    blocks since the auditor last set weights and, if at least
-    `weight_set_interval_blocks` have elapsed (≈300 blocks ≈ 1h), re-sets weights
-    from the latest CLEAN epoch's independently-replayed scores — shadowing the
-    honest validator and keeping the auditor's own vTrust from decaying. Re-uses
-    the last clean scores when no new report appeared this cycle. Never raises
-    into the loop.
+    Continuous process, NOT one-shot: each tick checks how close we are to the
+    subnet's next tempo (Yuma consensus) boundary and, when within `lead` blocks
+    of it (SN51-style — maximally fresh when consensus evaluates, the strongest
+    lever on vTrust), re-sets weights from the latest CLEAN epoch's independently-
+    replayed scores — shadowing the honest validator. Falls back to a flat block
+    interval if the tempo can't be read, and to a BURN-to-uid-0 set when no clean
+    epoch is available. A rate-limit floor prevents double-sets near the boundary.
+    Never raises into the loop.
     """
     from auditor.weights import (
         auditor_hotkey_ss58,
+        blocks_until_next_epoch,
         is_weight_set_due,
+        is_weight_set_due_tempo,
+        set_lead_blocks,
         submit_weights,
         weight_set_interval_blocks,
     )
@@ -236,20 +254,55 @@ def maybe_counter_weight(chain: ChainClient, api: ReportClient) -> None:
     if hotkey is None:
         return  # no wallet configured → stay read-only
 
-    interval = weight_set_interval_blocks()
     try:
         blocks_since = chain.blocks_since_weight_set(hotkey)
         current = chain.get_current_block()
+        tempo = chain.tempo()
     except Exception:
         logger.exception("counter-weight: chain query failed; skipping this tick")
         return
 
-    if not is_weight_set_due(blocks_since, interval):
+    if not tempo or tempo <= 0:
+        # Tempo unreadable / degenerate → fall back to the flat block interval
+        # (which has its own never-set / interval-based cadence).
+        interval = weight_set_interval_blocks()
+        if not is_weight_set_due(blocks_since, interval):
+            logger.debug(
+                "counter-weight: %s/%s blocks since last set (block %s) — not due (flat fallback)",
+                blocks_since, interval, current,
+            )
+            return
+    else:
+        lead = set_lead_blocks()
+        # Compute blocks-to-boundary from the block we already read (no second
+        # RPC; keeps blocks_left consistent with `current`).
+        blocks_left = blocks_until_next_epoch(current, chain.netuid, tempo)
+        if not is_weight_set_due_tempo(blocks_left, blocks_since, tempo, lead):
+            logger.debug(
+                "counter-weight: block %s — %s blocks to tempo boundary (lead %s, %s since last set) — not due",
+                current, blocks_left, lead, blocks_since,
+            )
+            return
+        # Double-set guard. The fire window is a few blocks wide (blocks_left in
+        # {lead..0}), so without a guard we'd re-submit on every tick of it. The
+        # chain's blocks_since lags (we set wait_for_finalization=False), so use a
+        # LOCAL last-fired marker (.audit_published). Size it to the rate-limit
+        # window but cap it BELOW tempo so it can never suppress the once-per-
+        # tempo boundary set; exempt the dead-man / never-set rescue path.
+        deadman = blocks_since is None or blocks_since > tempo * 2
+        rl = chain.weights_rate_limit() or 0
+        floor = max(rl if 0 < rl < tempo else 0, lead + 1)
+        last_pub = _read_int_file(PUBLISHED_FILE)
+        if not deadman and last_pub is not None and (current - last_pub) < floor:
+            logger.debug(
+                "counter-weight: boundary (blocks_left %s) but last set at block %s "
+                "(< %s blocks ago) — double-set guard, skipping", blocks_left, last_pub, floor,
+            )
+            return
         logger.info(
-            "counter-weight: %s/%s blocks since last set (block %s) — not due",
-            blocks_since, interval, current,
+            "counter-weight: block %s — %s blocks to tempo boundary (≤ lead %s) → setting weights",
+            current, blocks_left, lead,
         )
-        return
 
     epoch_id = _read_str_file(LAST_CLEAN_EPOCH_FILE)
     if not epoch_id:
@@ -267,8 +320,8 @@ def maybe_counter_weight(chain: ChainClient, api: ReportClient) -> None:
         return
 
     logger.info(
-        "counter-weight: due (%s≥%s blocks since last set, block %s) — setting from %s",
-        blocks_since, interval, current, epoch_id,
+        "counter-weight: due (block %s, %s blocks since last set) — setting from %s",
+        current, blocks_since, epoch_id,
     )
     try:
         envelope = api.get_report(epoch_id)
@@ -326,18 +379,28 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(audit_epoch(args.epoch, chain, api))
 
     if args.loop_:
+        from auditor.weights import is_enabled as _cw_enabled
+        # Counter-weight timing (SN51-style) must catch the ~2-block window just
+        # before the tempo boundary, so poll at block cadence when weight-setting
+        # is enabled; the heavier Gates-1-3 audit pass still runs only every
+        # AUDIT_INTERVAL_SECONDS. With weights off, fall back to the audit cadence.
+        poll = int(os.environ.get("AUDITOR_WEIGHT_POLL_SECONDS", "12")) if _cw_enabled() else interval
         logger.info(
-            "auditor loop started — repo=%s netuid=%s interval=%ss (subtensor=%s)",
-            repo, netuid, interval, subtensor_url,
+            "auditor loop started — repo=%s netuid=%s audit-interval=%ss poll=%ss (subtensor=%s)",
+            repo, netuid, interval, poll, subtensor_url,
         )
+        last_audit = 0.0
         while True:
             try:
-                code = audit_new_epochs(chain, api)
-                maybe_counter_weight(chain, api)  # block-cadence weight-set each tick
-                logger.info("audit pass complete (exit=%s) — sleeping %ss", code, interval)
+                now = time.time()
+                if now - last_audit >= interval:
+                    code = audit_new_epochs(chain, api)
+                    last_audit = now
+                    logger.info("audit pass complete (exit=%s)", code)
+                maybe_counter_weight(chain, api)  # cheap per-tick tempo-boundary check
             except Exception:
                 logger.exception("audit loop iteration failed")
-            time.sleep(interval)
+            time.sleep(poll)
 
     # default (and --once) -> single pass.
     code = audit_new_epochs(chain, api)
