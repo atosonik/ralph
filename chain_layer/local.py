@@ -88,20 +88,7 @@ class LocalChain(ChainInterface):
         path = self.chain_dir / "king.json"
         if not path.exists():
             return None
-        d = json.loads(path.read_text())
-        return KingRecord(
-            miner_hotkey=d["miner_hotkey"],
-            bundle_hash=d["bundle_hash"],
-            val_bpb=d["val_bpb"],
-            benchmark_accuracy=d.get("benchmark_accuracy", 0.0),
-            compute_cost=d.get("compute_cost_h100h", 0.0),
-            crowned_at=d.get("crowned_at", 0.0),
-            crowned_at_block=d.get("crowned_at_block", 0),
-            proof_dir=d.get("proof_dir"),
-            previous_king=d.get("previous_king"),
-            king_attestation_hash=d.get("king_attestation_hash", ""),
-            parent_king_attestation_hash=d.get("parent_king_attestation_hash"),
-        )
+        return KingRecord.from_dict(json.loads(path.read_text()))
 
     def set_king(self, king: KingRecord) -> None:
         d = {

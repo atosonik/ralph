@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -56,6 +57,30 @@ class KingRecord:
     previous_king: Optional[dict] = None
     king_attestation_hash: str = ""
     parent_king_attestation_hash: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "KingRecord":
+        """Reconstruct from a serialized king dict — the king.json top-level
+        record OR a nested `previous_king` entry.
+
+        Single source of truth for dict -> KingRecord so callers never diverge:
+        tolerates both `compute_cost` (dataclass asdict form) and
+        `compute_cost_h100h` (set_king / router.py form) and ignores unknown
+        keys, so it never raises on a forward- or legacy-serialized record.
+        """
+        return cls(
+            miner_hotkey=d["miner_hotkey"],
+            bundle_hash=d["bundle_hash"],
+            val_bpb=d["val_bpb"],
+            benchmark_accuracy=d.get("benchmark_accuracy", 0.0),
+            compute_cost=d.get("compute_cost", d.get("compute_cost_h100h", 0.0)),
+            crowned_at=d.get("crowned_at", 0.0),
+            crowned_at_block=d.get("crowned_at_block", 0),
+            proof_dir=d.get("proof_dir"),
+            previous_king=d.get("previous_king"),
+            king_attestation_hash=d.get("king_attestation_hash", ""),
+            parent_king_attestation_hash=d.get("parent_king_attestation_hash"),
+        )
 
 
 class ChainInterface(ABC):
@@ -103,6 +128,20 @@ class ChainInterface(ABC):
     @abstractmethod
     def set_king(self, king: KingRecord) -> None:
         """Update the king after a successful merge."""
+
+    def clear_king(self) -> None:
+        """Remove the current king record, returning to genesis (no king).
+
+        Concrete default: delete `chain_dir/king.json` if present. Both
+        LocalChain and BittensorChain store the king there; an implementation
+        with a different store may override. No-op if there is no chain_dir.
+        """
+        chain_dir = getattr(self, "chain_dir", None)
+        if not chain_dir:
+            return
+        king_path = Path(chain_dir) / "king.json"
+        if king_path.exists():
+            king_path.unlink()
 
     @abstractmethod
     def append_event(self, event: dict) -> None:
