@@ -66,6 +66,11 @@ ARG RECIPE_SOURCE_COMMIT=unknown
 ENV RALPH_SOURCE_COMMIT=${RALPH_SOURCE_COMMIT}
 ENV RECIPE_SOURCE_COMMIT=${RECIPE_SOURCE_COMMIT}
 
+# Flattened image layout: model/recipe/data/configs live directly under /app, so
+# point ralph_bootstrap's recipe resolver at /app. Without this it falls back to
+# /app/recipe and computes the measurement over an empty recipe tree (wrong hash).
+ENV RALPH_RECIPE_DIR=/app
+
 # Copy the protocol source — model, recipe, data, eval, calibration, proof.
 # This is the "canonical training code" whose hash is the measurement.
 COPY model/ /app/model/
@@ -78,6 +83,12 @@ COPY miner/ /app/miner/
 COPY validator/ /app/validator/
 COPY configs/ /app/configs/
 COPY restricted_files.yaml /app/restricted_files.yaml
+# README.md contributes to the container_measurement (proof/sources.py _PROTOCOL_FILES).
+COPY README.md /app/README.md
+# ralph_bootstrap.py is the top-level recipe-path resolver. It is not a package in
+# pyproject [tool.setuptools.packages.find], so `pip install -e` does not vendor it —
+# copy it explicitly or the runner crashes at `from ralph_bootstrap import RECIPE_DIR`.
+COPY ralph_bootstrap.py /app/ralph_bootstrap.py
 
 WORKDIR /app
 
