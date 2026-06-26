@@ -34,6 +34,13 @@ from pathlib import Path
 # attestation. The mainnet gate (single attested-execution tier) rejects mock;
 # the sim/testnet accepts it behind this flag. Set before importing the stack.
 os.environ.setdefault("RALPH_ALLOW_MOCK_ATTESTATION", "1")
+# This CPU box ships only a tiny dev token shard and no benchmark mix, so the
+# hidden-eval would otherwise fail closed. Opt into the synthetic fallback for
+# the smoke test (testnet relaxation, same spirit as the mock attestation).
+os.environ.setdefault("RALPH_ALLOW_SYNTHETIC_EVAL", "1")
+# The require-GitHub-PR gate (PR #56) rejects local submissions that carry no
+# recipe PR URL; the CPU smoke test submits directly, so relax it here.
+os.environ.setdefault("RALPH_REQUIRE_GH_PR", "0")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

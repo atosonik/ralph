@@ -370,13 +370,16 @@ class TestReproducibilityFields:
         assert r.sealed_stream_manifest_hash is None
         assert r.tail_val_bpb is None
 
-    def test_run_hidden_eval_surfaces_fields(self, tmp_path):
+    def test_run_hidden_eval_surfaces_fields(self, tmp_path, monkeypatch):
         """End-to-end: run_hidden_eval on a tiny model populates val_seq_len,
-        sealed_stream_manifest_hash, and tail_val_bpb (Phase-0 fallback path,
+        sealed_stream_manifest_hash, and tail_val_bpb (synthetic fallback path,
         no on-disk shard needed)."""
         import torch
 
         from eval.hidden_eval import run_hidden_eval
+
+        # tmp_path has no shard → opt into the synthetic fallback explicitly.
+        monkeypatch.setenv("RALPH_ALLOW_SYNTHETIC_EVAL", "1")
 
         class _Tiny(torch.nn.Module):
             def __init__(self, vocab=50257, dim=8):
