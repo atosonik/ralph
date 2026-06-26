@@ -297,6 +297,52 @@ def op1_diff_and_integrity(
     return True, "ok"
 
 
+def _check_canonical_source_version(proof_dir: Path) -> tuple[bool, str]:
+    """Actionable version-drift check for op2 — OFF unless
+    RALPH_CANONICAL_SOURCE_COMMITS is set (format 'ralph=<sha>,recipe=<sha>').
+
+    When set, the bundle's declared source commits (bundle_manifest.json:
+    ralph_source_commit / recipe_source_commit) must match the canonical pair,
+    else REJECT with a clear message. Best-effort: a missing manifest/field is
+    deferred to the measurement-hash check — this only turns a *known* version
+    drift into an actionable error; it is NOT the security gate (a miner who
+    spoofs the declared commit still fails the measurement check below).
+    """
+    import os
+    spec = os.environ.get("RALPH_CANONICAL_SOURCE_COMMITS", "").strip()
+    if not spec:
+        return True, ""
+    canon: dict[str, str] = {}
+    for kv in spec.split(","):
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            canon[k.strip()] = v.strip()
+    try:
+        m = json.loads((proof_dir / "bundle_manifest.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return True, ""
+
+    def _drift(field: str, want: str) -> str | None:
+        got = (m.get(field) or "").strip()
+        if not want or not got:
+            return None
+        # tolerate short vs full sha (either is a prefix of the other)
+        if want.startswith(got) or got.startswith(want):
+            return None
+        return f"{field.split('_')[0]}={got} (canonical {want})"
+
+    bad = [d for d in (
+        _drift("ralph_source_commit", canon.get("ralph", "")),
+        _drift("recipe_source_commit", canon.get("recipe", "")),
+    ) if d]
+    if bad:
+        return False, (
+            "built against non-canonical sources: " + "; ".join(bad)
+            + " — rebuild on the canonical ralph-prooftest image"
+        )
+    return True, ""
+
+
 def op2_attestation_verify(
     ralph_root: Path,
     submission_payload: dict,
@@ -333,6 +379,15 @@ def op2_attestation_verify(
     att_data = json.loads(att_text)
     from ralph_bootstrap import RECIPE_DIR
     expected_measurement = compute_container_measurement(ralph_root, recipe_dir=RECIPE_DIR)
+
+    # B-pin: actionable version-drift error (off unless RALPH_CANONICAL_SOURCE_COMMITS
+    # is set). Turns the opaque "container measurement mismatch" into a clear
+    # "built against ralph=X, canonical is ralph=Y — rebuild on the canonical
+    # image" for the common honest-miner-on-the-wrong-version case. The
+    # measurement-hash check below remains the security gate.
+    _vok, _vdetail = _check_canonical_source_version(proof_dir)
+    if not _vok:
+        return False, _vdetail, "rejected"
 
     allow_mock = _os.environ.get("RALPH_ALLOW_MOCK_ATTESTATION") == "1"
 
