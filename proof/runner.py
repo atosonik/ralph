@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from calibration import run_calibration
 from proof.real_attest import detect_capabilities, generate_attestation
 from proof.sources import compute_container_measurement
+
+
+def _source_commit(repo_dir: Path, env_var: str) -> str:
+    """The commit the measured sources were built from.
+
+    The canonical Docker image has no .git, so the build stamps the commit via
+    an env var (see Dockerfile ARG/ENV); fall back to `git rev-parse` for local
+    /dev runs. Recorded in the bundle manifest so the validator can report an
+    ACTIONABLE 'built against the wrong version' error instead of an opaque
+    container-measurement mismatch. (Informational — the measurement hash, bound
+    into the attestation, remains the security gate.)
+    """
+    v = os.environ.get(env_var, "").strip()
+    if v:
+        return v
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
 
 # Allowlist of env vars the patched training subprocess is permitted to see.
 # Miners control recipe/train.py via patch.diff, so anything inherited by the
@@ -426,6 +450,11 @@ def run_proof_test(
         "attestation_sha256": file_hash(att_path) if att_path else None,
         "bundle_hash": bundle_hash,
         "container_measurement": container_measurement,
+        # Source commits the measured tree was built from — lets the validator
+        # report a clear "wrong version" error instead of an opaque measurement
+        # mismatch. (Informational; container_measurement is the security gate.)
+        "ralph_source_commit": _source_commit(ralph_root, "RALPH_SOURCE_COMMIT"),
+        "recipe_source_commit": _source_commit(RECIPE_DIR, "RECIPE_SOURCE_COMMIT"),
         "handshake_nonce": handshake_nonce,
         "declared_seed": declared_seed,
         "tier": tier,
