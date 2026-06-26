@@ -354,6 +354,20 @@ def score_and_decide(
             "detail": result.rejected.detail,
         }
 
+    # Defense-in-depth: a non-rejected result MUST carry a hidden_eval. If op4
+    # ever returns ok with no eval, reject here instead of crashing on
+    # result.hidden_eval.val_bpb below — a single bad checkpoint would otherwise
+    # take down the whole epoch loop.
+    if result.hidden_eval is None:
+        return {
+            "status": "rejected",
+            "miner_hotkey": result.miner_hotkey,
+            "miner_github": result.miner_github,
+            "pr_url": result.pr_url,
+            "reason": "op4_hidden_eval",
+            "detail": "hidden_eval missing (checkpoint unloadable / re-eval failed)",
+        }
+
     pr_ok, pr_detail = _verify_pr_if_required(result, bundle_dir)
     if not pr_ok:
         return {

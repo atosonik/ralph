@@ -638,6 +638,16 @@ def judge_submission(
 
     ok, detail, hidden_eval = op4_hidden_eval(ralph_root, proof_dir)
     result.operations["op4_hidden_eval"] = {"ok": ok, "detail": detail}
+    if not ok:
+        # op4 failed — e.g. the checkpoint won't load into the validator's
+        # RalphBase (load_state_dict shape mismatch) AND the patched-workdir
+        # re-eval subprocess also failed, so op4 returns (False, detail, None).
+        # Reject cleanly (mirrors op1-op3) instead of returning a "passing"
+        # result with hidden_eval=None, which crashes scoring on
+        # NoneType.val_bpb and takes down the whole epoch loop — a DoS surface
+        # for any unloadable checkpoint.
+        result.rejected = ValidatorReject("op4_hidden_eval", detail)
+        return result
     result.hidden_eval = hidden_eval
 
     # Attach training + calibration summaries for downstream scoring.
