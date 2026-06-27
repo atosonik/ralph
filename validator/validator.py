@@ -446,7 +446,7 @@ def _patched_hidden_eval(
     import subprocess
     import tempfile
 
-    from proof.runner import apply_patch
+    from proof.runner import _redacted, _sanitized_env, apply_patch
 
     patch_path = proof_dir / "patch.diff"
     if not patch_path.exists():
@@ -486,11 +486,18 @@ def _patched_hidden_eval(
                 capture_output=True,
                 text=True,
                 timeout=240,
+                # SECURITY: eval_in_workdir.py imports and EXECUTES the miner's
+                # patched model.py. Never hand it the validator's environment —
+                # the seal privkey (RALPH_VALIDATOR_PRIVKEY), wallet, and cloud
+                # tokens would leak straight to attacker-controlled code. Pass an
+                # allowlist-only env (mirrors the miner-side training subprocess).
+                # PYTHONPATH points at the patched workdir so its model package wins.
+                env=_sanitized_env(extra={"PYTHONPATH": str(workdir)}),
             )
         except subprocess.TimeoutExpired:
             return False, "patched-eval subprocess timed out (>240s)", None
         if res.returncode != 0:
-            tail = (res.stderr or "")[-300:]
+            tail = _redacted(res.stderr or "")[-300:]
             return False, f"patched-eval subprocess exit={res.returncode}: {tail}", None
 
         marker = "RALPH_EVAL_RESULT "

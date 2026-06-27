@@ -71,6 +71,13 @@ _TRAINING_ENV_BLOCKLIST = (
     "AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "AWS_SESSION_TOKEN",
     "GCP_SERVICE_ACCOUNT_KEY", "GOOGLE_APPLICATION_CREDENTIALS",
     "GH_TOKEN", "GITHUB_TOKEN",
+    # Ralph validator secrets + unsafe escape hatches. The op4 patched-eval
+    # subprocess imports and runs the miner's model.py; it must never see the
+    # libsodium seal privkey (decrypts every bundle), nor be able to read/flip
+    # the enforcement toggles (e.g. fall back to a synthetic eval stream).
+    "RALPH_VALIDATOR_PRIVKEY", "RALPH_VALIDATOR_PRIVKEY_FILE",
+    "RALPH_TEST_MODE", "RALPH_ALLOW_SYNTHETIC_EVAL",
+    "RALPH_ALLOW_MOCK_ATTESTATION", "RALPH_SKIP_HANDSHAKE",
 )
 
 
