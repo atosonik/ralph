@@ -31,6 +31,67 @@ import numpy as np
 LN2 = math.log(2)
 
 
+def ce_from_topk_logits(
+    topk_logits: np.ndarray,
+    topk_indices: np.ndarray,
+    logsumexp: np.ndarray,
+    targets: np.ndarray,
+    vocab_size: int,
+) -> np.ndarray:
+    """Host-side cross-entropy (nats) at each scored cell, from the container's
+    emitted top-K logits — so the container NEVER receives the targets (leak-free:
+    miner code can't read the answer it isn't given).
+
+    The (untrusted) producer emits, per scored row, the top-K logits + their vocab
+    indices + the full-row logsumexp. The HOST holds the real target and computes:
+
+      * target in the emitted top-K:  CE = logsumexp - logit[target]  (exact).
+      * target NOT in top-K (the model ranked it below K): the target's probability
+        is at most the residual tail mass spread over the (V-K) unranked tokens, so
+        CE = log((V-K) / tail_mass). This PENALISES a producer that confidently
+        ranks K wrong tokens (tail_mass -> 0 -> CE -> large), removing any benefit
+        from omitting the (unknown) target from its top-K.
+
+    Returns a float64 array of per-cell CE in nats (>= 0). Shapes: topk_logits and
+    topk_indices are (M, K); logsumexp and targets are (M,).
+    """
+    topk_logits = np.asarray(topk_logits, dtype=np.float64)
+    topk_indices = np.asarray(topk_indices)
+    logsumexp = np.asarray(logsumexp, dtype=np.float64)
+    targets = np.asarray(targets)
+    if topk_logits.ndim != 2 or topk_logits.shape != topk_indices.shape:
+        raise ValueError(
+            f"topk_logits/topk_indices must match 2-D shapes; got {topk_logits.shape} {topk_indices.shape}"
+        )
+    m, k = topk_logits.shape
+    if logsumexp.shape != (m,) or targets.shape != (m,):
+        raise ValueError(f"logsumexp/targets must be ({m},); got {logsumexp.shape} {targets.shape}")
+    if not np.all(np.isfinite(topk_logits)) or not np.all(np.isfinite(logsumexp)):
+        raise ValueError("non-finite topk_logits/logsumexp")
+    if np.any((topk_indices < 0) | (topk_indices >= vocab_size)):
+        raise ValueError("topk_indices outside [0, vocab_size)")
+    sorted_i = np.sort(topk_indices, axis=1)
+    if k > 1 and np.any(sorted_i[:, 1:] == sorted_i[:, :-1]):
+        raise ValueError("duplicate topk_indices within a row")
+    # logsumexp MUST be >= logsumexp over the emitted top-K (the full-vocab sum
+    # cannot be smaller than a partial sum). Otherwise the top-K probs would sum
+    # to > 1 (negative tail mass) — an impossible/forged normalization. Rejecting
+    # this closes the "shrink logsumexp to deflate CE" forgery instead of clipping.
+    mx = topk_logits.max(axis=1)
+    lse_topk = mx + np.log(np.exp(topk_logits - mx[:, None]).sum(axis=1))
+    if np.any(logsumexp + 1e-4 < lse_topk):
+        raise ValueError("logsumexp < logsumexp(top-K) — impossible normalization")
+
+    match = topk_indices == targets[:, None]           # (M, K) — one True at most per row
+    hit = match.any(axis=1)
+    logit_at_target = np.where(match, topk_logits, -np.inf).max(axis=1)
+    ce_exact = logsumexp - logit_at_target              # valid where hit
+    probs_topk = np.exp(topk_logits - logsumexp[:, None])
+    tail_mass = np.clip(1.0 - probs_topk.sum(axis=1), 1e-12, None)
+    ce_miss = np.log(max(vocab_size - k, 1) / tail_mass)
+    return np.maximum(np.where(hit, ce_exact, ce_miss), 0.0)
+
+
 @dataclass(frozen=True)
 class HostReduced:
     val_bpb: float

@@ -821,25 +821,277 @@ def _save_cached_hidden_eval(proof_dir: Path, shard_fp: str, result: HiddenEvalR
         pass  # cache is a pure optimization — never fail scoring on a write error
 
 
-def op4_hidden_eval(
+# --- HOSB (Host-Owned Suffix-Blanked) op4 scoring -------------------------------
+# Look-ahead is useless BY CONSTRUCTION: the host builds the eval grid with the
+# answer (input[t+1]) blanked to filler and holds the real target out-of-band; the
+# (sandboxed) model emits per-position NLLs; the HOST reduces val_bpb + runs the
+# witnesses. Gated by RALPH_HOSB: "off" (default, legacy) | "shadow" (legacy
+# crowns, HOSB logged to hosb_shadow.jsonl for tolerance calibration) | "enforce"
+# (HOSB is the crown; fail-closed on a witness rejection, missing chain entropy,
+# or no pinned sandbox image). Tolerances are env-tunable for on-box calibration.
+
+
+def _hosb_mode() -> str:
+    import os
+    m = os.environ.get("RALPH_HOSB", "off").strip().lower()
+    return m if m in ("off", "shadow", "enforce") else "off"
+
+
+def _hosb_tolerances() -> dict:
+    import os
+
+    def _f(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "tol_witness": _f("RALPH_HOSB_TOL_WITNESS", 0.05),
+        "wrong_target_floor": _f("RALPH_HOSB_WRONG_FLOOR", 1.0),
+        "wrong_target_max_low_frac": _f("RALPH_HOSB_WRONG_MAX_LOW", 0.5),
+        "n_scored_per_window": int(_f("RALPH_HOSB_N_SCORED", 16)),
+    }
+
+
+def derive_grid_seed(
+    block_hash_hex: str, eval_shard_fp: str, bundle_fp: str, secret: str = ""
+) -> bytes:
+    """32-byte HOSB grid seed = blake2b(block_hash || shard_fp || bundle_fp || secret).
+
+    Security note (do NOT overclaim): the grid seed selects WHICH positions are
+    scored / which are witness cells. The PRIMARY look-ahead defense does not
+    depend on this being secret — the answer is physically absent from every
+    scored row (filler), so a look-ahead forward gains nothing regardless. The
+    seed's job is only to keep the witness-cell LAYOUT unpredictable. Its secrecy
+    rests on the held-out `eval_shard_fp` (the shard is secret) and, when set, the
+    validator-only `secret` (RALPH_HOSB_SECRET, never serialized) — NOT on the
+    block hash, which is public and (for a same-epoch score) may predate the
+    submission. `block_hash` + `bundle_fp` make the seed unique per (epoch, bundle)
+    and reproducible for audit; they are not the secret.
+    """
+    h = hashlib.blake2b(digest_size=32)
+    for part in (block_hash_hex, eval_shard_fp, bundle_fp, secret):
+        h.update(b"\x00")
+        h.update(str(part).encode("utf-8"))
+    return h.digest()
+
+
+def _bundle_fp(proof_dir: Path) -> str:
+    try:
+        return hashlib.sha256((proof_dir / "submission.json").read_bytes()).hexdigest()
+    except OSError:
+        return proof_dir.name
+
+
+def _hosb_epoch_seed(chain, eval_shard_fp: str, bundle_fp: str):
+    """(seed, epoch_tag) anchored to the current weight-epoch window so the grid is
+    STABLE within an epoch (deferred-challenger cache hits) and ROTATES across
+    epochs. (None, None) without chain entropy — the caller MUST fail closed in
+    enforce mode rather than use a fixed seed. Mixes a validator-only secret
+    (RALPH_HOSB_SECRET) so the witness layout doesn't collapse onto shard_fp."""
+    import os
+    if chain is None:
+        return None, None
+    try:
+        e = max(1, int(os.environ.get("RALPH_HOSB_EPOCH_BLOCKS", "360")))
+        anchor = (int(chain.get_current_block()) // e) * e
+        bh = str(chain.get_block_hash(anchor))
+    except Exception:
+        return None, None
+    secret = os.environ.get("RALPH_HOSB_SECRET", "") or os.environ.get("RALPH_VALIDATOR_HOTKEY", "")
+    seed = derive_grid_seed(bh, eval_shard_fp, bundle_fp, secret)
+    return seed, f"{anchor}:{bh[:16]}"
+
+
+def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid):
+    """Run the (untrusted) model over the HOST grid in the hardened container and
+    return the per-cell NLLs the host computes ITSELF.
+
+    LEAK-FREE: the container is given ONLY idx_grid (blanked rows) + scored_idx
+    (the scored COLUMN per row — not the answer) + an optional benchmark file. It
+    NEVER receives the targets, so miner code cannot read the answer key off disk.
+    It emits the top-K logits at each scored cell; the HOST computes cross-entropy
+    against the targets it kept (`ce_from_topk_logits`). Returns (nlls_2d, manifest)
+    so the caller reduces it exactly like the in-process path. Raises on failure.
+    """
+    import os
+    import shutil
+    import tempfile
+
+    import numpy as np
+
+    from eval.host_reduce import ce_from_topk_logits
+    from ralph_bootstrap import RECIPE_DIR
+    from validator.sandbox import Mount, SandboxConfig, SandboxUnavailable, is_pinned_image, run_in_sandbox
+
+    image = os.environ.get("RALPH_SANDBOX_IMAGE", "")
+    if not is_pinned_image(image):
+        raise SandboxUnavailable("HOSB requires a pinned RALPH_SANDBOX_IMAGE (name@sha256:… or sha256:…)")
+    gpu = int(os.environ.get("RALPH_SANDBOX_GPU", "0")) if torch.cuda.is_available() else None
+    cfg = SandboxConfig(image=image, gpu_device=gpu)
+    top_k = int(os.environ.get("RALPH_HOSB_TOPK", "256"))
+
+    idx_grid = np.asarray(idx_grid)
+    tgt_grid = np.asarray(tgt_grid)
+    # The scored column per row + the private target there (host-side only).
+    scored_idx = (tgt_grid != -100).argmax(axis=1)
+    rows = np.arange(idx_grid.shape[0])
+    targets = tgt_grid[rows, scored_idx]
+
+    grid_dir = Path(tempfile.mkdtemp(prefix="ralph_hosb_grid_"))
+    out_dir = Path(tempfile.mkdtemp(prefix="ralph_hosb_out_"))
+    try:
+        np.save(grid_dir / "idx_grid.npy", idx_grid)
+        np.save(grid_dir / "scored_idx.npy", scored_idx)  # positions, NOT the answer
+        (grid_dir / "job.json").write_text(json.dumps({"top_k": top_k}))
+        bpath = ralph_root / "eval" / "private" / "active_benchmark.json"
+        if bpath.exists():
+            shutil.copy(bpath, grid_dir / "active_benchmark.json")
+        mounts = [
+            Mount(Path(RECIPE_DIR), "/canon", ro=True),
+            Mount(proof_dir, "/in", ro=True),
+            Mount(grid_dir, "/grid", ro=True),  # idx_grid + scored_idx — NO targets, NO raw shard
+        ]
+        container_argv = [
+            "python", "-m", "validator.sandbox_eval", "--grid",
+            "/canon", "/in/patch.diff", "/in/training/checkpoint.pt", "/grid", "/out",
+        ]
+        res = run_in_sandbox(
+            cfg, container_argv=container_argv, mounts=mounts, out_dir=out_dir,
+            timeout_s=int(os.environ.get("RALPH_SANDBOX_TIMEOUT_S", "2400")),
+        )
+        if res.returncode != 0:
+            raise RuntimeError(f"HOSB grid container failed (rc={res.returncode}): {res.stderr[-300:]}")
+        mpath = out_dir / "manifest.json"
+        needed = [out_dir / f for f in ("topk_logits.npy", "topk_indices.npy", "logsumexp.npy")]
+        if not (mpath.exists() and all(p.exists() for p in needed)):
+            raise RuntimeError("HOSB grid container produced no topk/logsumexp/manifest")
+        manifest = json.loads(mpath.read_text())
+        # V is HOST-pinned from the checkpoint config (== the model's real lm_head
+        # width — a miner can't forge it low without breaking load_state_dict, and
+        # it's vocab-enforced to RALPH_VOCAB_SIZE for real submissions). NEVER the
+        # container manifest: under-reporting V would collapse the no-target penalty
+        # log((V-K)/tail_mass) and forge a low val_bpb past both witnesses.
+        host_vocab = int(_safe_load_checkpoint_config(proof_dir / "training" / "checkpoint.pt")["vocab_size"])
+        k_expected = min(top_k, host_vocab)
+        topk_logits, topk_idx, lse = (np.load(p) for p in needed)
+        m = idx_grid.shape[0]
+        if topk_logits.shape != (m, k_expected) or topk_idx.shape != (m, k_expected) or lse.shape != (m,):
+            raise RuntimeError(
+                f"HOSB top-K shape mismatch: got {topk_logits.shape}/{topk_idx.shape}/{lse.shape}, "
+                f"expected ({m},{k_expected})"
+            )
+        ce = ce_from_topk_logits(topk_logits, topk_idx, lse, targets, host_vocab)
+        # Scatter the host-computed CE back to (M, L) at each row's scored column.
+        nlls_2d = np.zeros(idx_grid.shape, dtype=np.float64)
+        nlls_2d[rows, scored_idx] = ce
+        return nlls_2d, manifest
+    finally:
+        shutil.rmtree(grid_dir, ignore_errors=True)
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
+def _hosb_eval(ralph_root: Path, proof_dir: Path, chain, nll_provider=None):
+    """HOSB op4: host builds the blanked grid (block-hash entropy), the (sandboxed)
+    model emits per-position NLLs, the HOST reduces val_bpb + runs the witnesses.
+    `nll_provider(idx_grid, tgt_grid) -> (nlls, manifest)` defaults to the sandbox;
+    tests inject an in-process provider. Returns (ok, detail, HiddenEvalResult|None);
+    a witness rejection / missing entropy / grid failure is FAIL-CLOSED."""
+    import numpy as np
+
+    from eval.host_reduce import NonCausalModelError, hash_target_stream, reduce_blanked_nlls
+    from eval.val_bpb import DEFAULT_BYTES_PER_TOKEN, build_blanked_grid, load_eval_tokens, pinned_eval_seq_len
+
+    eval_dir = ralph_root / "eval" / "private"
+    ckpt_path = proof_dir / "training" / "checkpoint.pt"
+    tok_path = eval_dir / "active_tokens.bin"
+    if not ckpt_path.exists():
+        return False, f"HOSB: missing checkpoint at {ckpt_path}", None
+    if not tok_path.exists():
+        return False, f"HOSB: missing held-out shard at {eval_dir}", None
+
+    shard_fp = _eval_shard_fingerprint(eval_dir)
+    seed, _tag = _hosb_epoch_seed(chain, shard_fp, _bundle_fp(proof_dir))
+    if seed is None:
+        return False, "HOSB: no chain entropy for the grid seed (fail-closed)", None
+    try:
+        seq_len = pinned_eval_seq_len(_safe_load_checkpoint_config(ckpt_path)["max_seq_len"])
+    except (KeyError, ValueError, RuntimeError, OSError) as e:
+        return False, f"HOSB: could not derive seq_len: {e}", None
+
+    tokens = np.asarray(load_eval_tokens(tok_path))
+    tol = _hosb_tolerances()
+    # Filler = real-text slices of the SAME held-out corpus (build_blanked_grid
+    # draws a random offset per row). Same distribution, and the answer is absent
+    # regardless; shard secrecy is defended by rotation, not by the filler source.
+    idx_grid, tgt_grid, layout = build_blanked_grid(
+        tokens, tokens, seq_len, seed, n_scored_per_window=tol["n_scored_per_window"]
+    )
+
+    provider = nll_provider or (lambda ig, tg: _hosb_sandbox_nlls(ralph_root, proof_dir, ig, tg))
+    try:
+        nlls, manifest = provider(idx_grid, tgt_grid)
+    except Exception as e:  # noqa: BLE001 — SandboxUnavailable/RuntimeError/etc → fail closed
+        return False, f"HOSB: grid eval failed (fail-closed): {e}", None
+
+    try:
+        reduced = reduce_blanked_nlls(
+            np.asarray(nlls), layout, seq_len=seq_len, bytes_per_token=DEFAULT_BYTES_PER_TOKEN,
+            eval_set_hash=hash_target_stream(tokens),
+            tol_witness=tol["tol_witness"], wrong_target_floor=tol["wrong_target_floor"],
+            wrong_target_max_low_frac=tol["wrong_target_max_low_frac"],
+        )
+    except NonCausalModelError as e:
+        return False, f"HOSB REJECTED (non-causal/look-ahead): {e}", None
+    except ValueError as e:
+        return False, f"HOSB: malformed grid output (fail-closed): {e}", None
+
+    result = HiddenEvalResult(
+        val_bpb=reduced.val_bpb,
+        benchmark_accuracy=round(float(manifest.get("benchmark_accuracy", 0.0)), 3),
+        tokens_evaluated=reduced.tokens_evaluated,
+        benchmark_examples=int(manifest.get("benchmark_examples", 0)),
+        eval_set_hash=reduced.eval_set_hash,
+        val_seq_len=seq_len,
+        tail_val_bpb=reduced.tail_val_bpb,
+    )
+    return True, f"val_bpb={result.val_bpb:.4f} bench={result.benchmark_accuracy:.3f} (HOSB)", result
+
+
+def _hosb_shadow_log(ralph_root: Path, proof_dir: Path, chain, legacy) -> None:
+    """Run HOSB alongside the crowned legacy score and append the comparison to
+    hosb_shadow.jsonl — the owner's calibration signal (legacy vs HOSB val_bpb,
+    witness pass/reject). Never affects the crown; never raises."""
+    rec: dict = {"bundle": proof_dir.name, "legacy_val_bpb": round(float(legacy.val_bpb), 6)}
+    try:
+        ok, detail, hosb = _hosb_eval(ralph_root, proof_dir, chain)
+        rec["hosb_ok"] = bool(ok)
+        rec["hosb_detail"] = detail
+        if ok and hosb is not None:
+            rec["hosb_val_bpb"] = round(float(hosb.val_bpb), 6)
+            rec["delta_vs_legacy"] = round(float(hosb.val_bpb - legacy.val_bpb), 6)
+            rec["hosb_tail_val_bpb"] = hosb.tail_val_bpb
+            rec["hosb_benchmark"] = hosb.benchmark_accuracy
+    except Exception as e:  # noqa: BLE001 — shadow logging must never break scoring
+        rec["hosb_ok"] = False
+        rec["hosb_detail"] = f"shadow error: {e}"
+    try:
+        with (ralph_root / "hosb_shadow.jsonl").open("a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
+
+
+def _legacy_hidden_eval(
     ralph_root: Path,
     proof_dir: Path,
 ) -> tuple[bool, str, HiddenEvalResult | None]:
+    """Pre-HOSB op4 scoring: sandbox window-NLLs (RALPH_SANDBOX=1) OR the
+    canonical/patched subprocess. No caching — the op4 dispatcher owns the cache."""
     import os
-    eval_dir = ralph_root / "eval" / "private"
-    shard_fp = _eval_shard_fingerprint(eval_dir)
-    cached = _load_cached_hidden_eval(proof_dir, shard_fp)
-    if cached is not None:
-        return True, f"val_bpb={cached.val_bpb:.4f} bench={cached.benchmark_accuracy:.3f} (cached)", cached
-
-    # Sandbox mode: run the (untrusted) model in the hardened container; the host
-    # reduces val_bpb. Cache the result like the canonical path so a deferred
-    # challenger isn't re-containerised every epoch.
     if os.environ.get("RALPH_SANDBOX", "0") == "1":
-        ok, detail, result = _sandboxed_hidden_eval(ralph_root, proof_dir)
-        if ok and result is not None:
-            _save_cached_hidden_eval(proof_dir, shard_fp, result)
-        return ok, detail, result
+        return _sandboxed_hidden_eval(ralph_root, proof_dir)
 
     ckpt_path = proof_dir / "training" / "checkpoint.pt"
     if not ckpt_path.exists():
@@ -860,25 +1112,61 @@ def op4_hidden_eval(
         model = RalphBase(cfg)
         model.load_state_dict(state_dict)
     except RuntimeError as e:
-        # Architecture divergence between canonical RalphBase and the miner's
-        # trained model (typically a structural patch that adds parameters).
-        # Retry under the patched workdir so the actually-trained model code
-        # is what scores the checkpoint.
+        # Architecture divergence (a structural patch that adds parameters):
+        # retry under the patched workdir so the actually-trained model scores.
         if _is_state_dict_shape_mismatch(e):
-            ok, detail, result = _patched_hidden_eval(ralph_root, proof_dir, ckpt_path)
-            if ok and result is not None:
-                _save_cached_hidden_eval(proof_dir, shard_fp, result)
-            return ok, detail, result
+            return _patched_hidden_eval(ralph_root, proof_dir, ckpt_path)
         raise
     # The CPU load above only ROUTED canonical-vs-patched; free it and run the GPU
-    # forward in a SUBPROCESS so a fatal CUDA fault kills only the child (the
-    # validator rejects the bundle instead of aborting; a C++ CUDA abort can't be
-    # caught in-process). Default path; RALPH_SANDBOX=1 used the container above.
+    # forward in a SUBPROCESS so a fatal CUDA fault kills only the child.
     del model, state_dict
     from ralph_bootstrap import RECIPE_DIR
-    ok, detail, result = _run_eval_subprocess(RECIPE_DIR, ckpt_path, ralph_root, "canonical-eval")
+    return _run_eval_subprocess(RECIPE_DIR, ckpt_path, ralph_root, "canonical-eval")
+
+
+def op4_hidden_eval(
+    ralph_root: Path,
+    proof_dir: Path,
+    chain=None,
+) -> tuple[bool, str, HiddenEvalResult | None]:
+    """Compute the crown-deciding val_bpb. RALPH_HOSB selects the path:
+    off (default) = legacy; shadow = legacy crowns + HOSB logged for calibration;
+    enforce = HOSB is the crown (fail-closed on witness reject / no entropy)."""
+    eval_dir = ralph_root / "eval" / "private"
+    shard_fp = _eval_shard_fingerprint(eval_dir)
+    mode = _hosb_mode()
+
+    if mode == "enforce":
+        # GUARD: enforce is NOT yet cheat-proof — two verified container-side
+        # forgeries remain open (the top-K logsumexp/partition function and the
+        # container-reported benchmark_accuracy; see the HOSB enforce-gating
+        # checklist). Refuse to crown on it without an explicit ack so it can't be
+        # flipped on mainnet by accident. Fail-CLOSED (reject), never crown a cheat.
+        import os
+        if os.environ.get("RALPH_HOSB_ENFORCE_ACK", "0") != "1":
+            return False, (
+                "HOSB enforce is not cheat-proof yet (logsumexp + benchmark forgeries open); "
+                "set RALPH_HOSB_ENFORCE_ACK=1 to override for testing, or use RALPH_HOSB=shadow"
+            ), None
+        _seed, tag = _hosb_epoch_seed(chain, shard_fp, _bundle_fp(proof_dir))
+        cache_fp = f"{shard_fp}|hosb-enforce|{tag or 'noentropy'}"
+        cached = _load_cached_hidden_eval(proof_dir, cache_fp)
+        if cached is not None:
+            return True, f"val_bpb={cached.val_bpb:.4f} bench={cached.benchmark_accuracy:.3f} (cached HOSB)", cached
+        ok, detail, result = _hosb_eval(ralph_root, proof_dir, chain)
+        if ok and result is not None:
+            _save_cached_hidden_eval(proof_dir, cache_fp, result)
+        return ok, detail, result
+
+    # off / shadow: the LEGACY score is crowned (shadow additionally logs HOSB).
+    cached = _load_cached_hidden_eval(proof_dir, shard_fp)
+    if cached is not None:
+        return True, f"val_bpb={cached.val_bpb:.4f} bench={cached.benchmark_accuracy:.3f} (cached)", cached
+    ok, detail, result = _legacy_hidden_eval(ralph_root, proof_dir)
     if ok and result is not None:
         _save_cached_hidden_eval(proof_dir, shard_fp, result)
+        if mode == "shadow":
+            _hosb_shadow_log(ralph_root, proof_dir, chain, result)
     return ok, detail, result
 
 
@@ -927,7 +1215,7 @@ def judge_submission(
         result.rejected = ValidatorReject("op3_log_plausibility", detail)
         return result
 
-    ok, detail, hidden_eval = op4_hidden_eval(ralph_root, proof_dir)
+    ok, detail, hidden_eval = op4_hidden_eval(ralph_root, proof_dir, chain=chain)
     result.operations["op4_hidden_eval"] = {"ok": ok, "detail": detail}
     if not ok:
         # op4 failed — e.g. the checkpoint won't load into the validator's
