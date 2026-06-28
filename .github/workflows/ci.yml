@@ -21,10 +21,17 @@ jobs:
       # The Ralph codebase imports from a sibling RalphLabsAI/recipe checkout
       # via ralph_bootstrap.py. Clone it into the parent directory so
       # RALPH_RECIPE_DIR autodetection finds it.
+      #
+      # Pin to the CANONICAL recipe tag (the one the validator runs), NOT recipe
+      # main: main tracks the latest king's auto-merged recipe, which can carry a
+      # model that breaks the protocol tests (e.g. a U-Net skip-gate forward that
+      # index-errors on the tests' small config). Bump this when the canonical
+      # recipe advances.
       - name: Checkout RalphLabsAI/recipe
         uses: actions/checkout@v4
         with:
           repository: RalphLabsAI/recipe
+          ref: recipe-v0.2.3
           path: recipe_repo
 
       - name: Set up Python ${{ matrix.python-version }}

@@ -35,6 +35,50 @@ ALPHA_VERIFIED = 1.0
 # the published verdict at docs/direction_reframe/00_VERDICT.md §6.
 DOMINANT_QUALITY_MULTIPLIER = 3.0
 
+# Calibrated H100 matmul_ms reference for cost normalization. Measured on an
+# NVIDIA H100 PCIe (float32) running the run_calibration workload (~0.51 ms). The
+# previous 5.0 was a placeholder that inflated normalized H100-hours ~14x (it made
+# a real ~7 wall-clock-hour run look like 102 "H100-hours"). Override per host
+# with RALPH_H100_MATMUL_MS_REF (e.g. a different reference GPU).
+DEFAULT_H100_MATMUL_MS_REF = 0.51
+
+
+def _h100_matmul_ms_ref() -> float:
+    try:
+        v = float(os.environ.get("RALPH_H100_MATMUL_MS_REF", ""))
+    except (TypeError, ValueError):
+        return DEFAULT_H100_MATMUL_MS_REF
+    return v if v > 0 else DEFAULT_H100_MATMUL_MS_REF
+
+
+# bpb-points charged per normalized H100-hour in the net-score crown gate.
+# Exchange rate: 1/weight = H100-hours of compute that one bpb-point of quality
+# improvement "pays for". At 0.002 a typical 0.05-bpb incremental win stays
+# net-positive up to ~25 H100h and is rejected beyond that — efficiency pressure
+# without freezing incremental competition. Tune UP for more pressure.
+DEFAULT_COMPUTE_COST_WEIGHT = 0.002
+
+
+def _compute_cost_weight() -> float:
+    """Weight on normalized H100-hours — the cost term in `score`, and thus in the
+    net-score crown gate. Tunable via RALPH_COMPUTE_COST_WEIGHT (default
+    DEFAULT_COMPUTE_COST_WEIGHT). Higher = more efficiency pressure (a wasteful run
+    needs proportionally larger quality/benchmark gains to stay net-positive)."""
+    try:
+        v = float(os.environ.get("RALPH_COMPUTE_COST_WEIGHT", ""))
+    except (TypeError, ValueError):
+        return DEFAULT_COMPUTE_COST_WEIGHT
+    return v if v >= 0 else DEFAULT_COMPUTE_COST_WEIGHT
+
+
+def _compute_crown_gate_enabled() -> bool:
+    """Net-score crown gate. On by default now the cost reference is calibrated;
+    RALPH_COMPUTE_CROWN_GATE in {0,false,no,off} reverts to quality/benchmark-only
+    crowning (escape hatch if the cost model ever misbehaves on mainnet)."""
+    return os.environ.get("RALPH_COMPUTE_CROWN_GATE", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
 
 def get_king_rule() -> str:
     """Return the currently-active king-selection rule.
@@ -76,17 +120,19 @@ class ScoreReport:
 def _hours_to_normalized_h100(
     matmul_ms: float,
     wall_clock_s: float,
-    h100_matmul_ms_ref: float = 5.0,
+    h100_matmul_ms_ref: float | None = None,
 ) -> float:
     """Translate wall-clock into normalized H100-hours via the calibration
     benchmark's matmul timing. The miner's machine took (matmul_ms / h100_ref)
     times as long as an H100 would have, so each wall-clock hour counts as
     (h100_ref / matmul_ms) normalized H100-hours.
 
-    Reference: h100_matmul_ms_ref is the matmul_ms on an H100 for the
-    calibration workload, to be measured in Phase 0.5 and pinned in this file.
-    The 5.0 default is a placeholder.
+    Reference: h100_matmul_ms_ref is the matmul_ms on a reference H100 for the
+    calibration workload (DEFAULT_H100_MATMUL_MS_REF, calibrated on H100 PCIe),
+    overridable via RALPH_H100_MATMUL_MS_REF.
     """
+    if h100_matmul_ms_ref is None:
+        h100_matmul_ms_ref = _h100_matmul_ms_ref()
     if matmul_ms <= 0:
         return wall_clock_s / 3600.0
     speed_factor = h100_matmul_ms_ref / matmul_ms
@@ -104,7 +150,7 @@ def score_bundle(
     tier: str = "verified",
     bpb_weight: float = 1.0,
     benchmark_weight: float = 1.0,
-    cost_weight: float = 0.1,
+    cost_weight: float | None = None,
 ) -> ScoreReport:
     """
     Quality gain on val_bpb is computed as (king - challenger) since lower
@@ -147,6 +193,8 @@ def score_bundle(
             (benchmark_gain > noise_floor_margin and quality_gain >= -noise_floor_margin)
         )
 
+    if cost_weight is None:
+        cost_weight = _compute_cost_weight()
     cost_h100h = _hours_to_normalized_h100(matmul_ms, wall_clock_s)
     # v1.2: no α factor.
     cost_effective = cost_h100h
@@ -156,6 +204,16 @@ def score_bundle(
         + benchmark_weight * benchmark_gain
         - cost_weight * cost_effective
     )
+
+    # Compute-aware crown gate (calibrated net-score): a challenger that beats the
+    # king on quality/benchmark must ALSO be net-positive once compute is charged
+    # — quality_gain + benchmark_gain must outweigh cost_weight * normalized
+    # H100-hours (i.e. score > 0). Rewards efficiency, rejects runaway compute,
+    # with NO hard hour cap. `decisively` is only ever True against a real
+    # incumbent (genesis crowns via is_first in the caller), so the first king is
+    # never blocked. Escape hatch: RALPH_COMPUTE_CROWN_GATE=0.
+    if decisively and _compute_crown_gate_enabled() and score <= 0:
+        decisively = False
 
     return ScoreReport(
         val_bpb=val_bpb,

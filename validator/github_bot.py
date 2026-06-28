@@ -81,6 +81,23 @@ def close_pr(pr_url: str, token: str, comment: str | None = None) -> tuple[bool,
         return False, f"close failed: {e}"
 
 
+def pr_is_merged(pr_url: str, token: str) -> bool:
+    """True iff the recipe PR at pr_url is MERGED.
+
+    Best-effort: a malformed URL, a missing token, or any API error returns
+    False (fail closed) so callers that gate on a merged PR never grant credit
+    to a PR they could not verify.
+    """
+    if not pr_url or not token:
+        return False
+    try:
+        owner, repo, num = _parse_pr_url(pr_url)
+        pr = _gh("GET", f"/repos/{owner}/{repo}/pulls/{num}", token)
+    except Exception:
+        return False
+    return bool(isinstance(pr, dict) and pr.get("merged"))
+
+
 # Real GitHub handle rules: 1–39 chars, ASCII alphanumerics or hyphen.
 # (GitHub additionally disallows leading/trailing hyphens, but we keep the
 # regex strict-but-simple here; the practical attack we block is newlines,

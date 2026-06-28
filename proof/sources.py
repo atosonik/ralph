@@ -19,6 +19,20 @@ _RECIPE_DIRS = ("model", "recipe", "data", "configs")
 _PROTOCOL_DIRS = ("eval", "calibration", "proof")
 _PROTOCOL_FILES = ("restricted_files.yaml", "README.md")
 
+# Repo-relative path prefixes that MUST NOT contribute to the measurement.
+# eval/private/ holds the validator's SECRET held-out eval set (active_*.json):
+# the validator has it, miners never do, so including it makes the validator's
+# measurement impossible for any miner to reproduce — every honest verified-tier
+# submission rejects at op2 with "container measurement mismatch". Excluding it
+# lets both sides hash the identical shared tree. (eval/downstream/private_hard.py
+# is kept — only the eval/private/ DIR is dropped.)
+_EXCLUDED_REL_PREFIXES: tuple[tuple[str, ...], ...] = (("eval", "private"),)
+
+
+def _is_excluded(rel: Path) -> bool:
+    parts = rel.parts
+    return any(parts[: len(pre)] == pre for pre in _EXCLUDED_REL_PREFIXES)
+
 
 def list_proof_sources(
     ralph_root: Path,
@@ -59,7 +73,10 @@ def list_proof_sources(
                     continue
                 if p.suffix not in _CONTRIBUTING_EXTS:
                     continue
-                pairs.append((base, p.relative_to(base)))
+                rel = p.relative_to(base)
+                if _is_excluded(rel):
+                    continue
+                pairs.append((base, rel))
 
     for fname in _PROTOCOL_FILES:
         fp = ralph_root / fname

@@ -50,6 +50,27 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu124 && \
     pip install --no-cache-dir -e /app
 
+# Pin the source commits the measured tree is built from. The image has no
+# .git, so these env vars are how proof/runner.py records ralph_source_commit /
+# recipe_source_commit in the bundle manifest — letting the validator report a
+# clear "built against the wrong version" error instead of an opaque measurement
+# mismatch (see RALPH_CANONICAL_SOURCE_COMMITS on the validator).
+#   docker build \
+#     --build-arg RALPH_SOURCE_COMMIT=$(git -C ralph rev-parse HEAD) \
+#     --build-arg RECIPE_SOURCE_COMMIT=$(git -C recipe rev-parse HEAD) .
+# For a REPRODUCIBLE measurement: assemble the build context from those exact
+# (clean) commits, and do NOT include eval/private/ — the validator's secret
+# held-out eval, excluded from the measurement and never shipped to miners.
+ARG RALPH_SOURCE_COMMIT=unknown
+ARG RECIPE_SOURCE_COMMIT=unknown
+ENV RALPH_SOURCE_COMMIT=${RALPH_SOURCE_COMMIT}
+ENV RECIPE_SOURCE_COMMIT=${RECIPE_SOURCE_COMMIT}
+
+# Flattened image layout: model/recipe/data/configs live directly under /app, so
+# point ralph_bootstrap's recipe resolver at /app. Without this it falls back to
+# /app/recipe and computes the measurement over an empty recipe tree (wrong hash).
+ENV RALPH_RECIPE_DIR=/app
+
 # Copy the protocol source — model, recipe, data, eval, calibration, proof.
 # This is the "canonical training code" whose hash is the measurement.
 COPY model/ /app/model/
@@ -62,6 +83,12 @@ COPY miner/ /app/miner/
 COPY validator/ /app/validator/
 COPY configs/ /app/configs/
 COPY restricted_files.yaml /app/restricted_files.yaml
+# README.md contributes to the container_measurement (proof/sources.py _PROTOCOL_FILES).
+COPY README.md /app/README.md
+# ralph_bootstrap.py is the top-level recipe-path resolver. It is not a package in
+# pyproject [tool.setuptools.packages.find], so `pip install -e` does not vendor it —
+# copy it explicitly or the runner crashes at `from ralph_bootstrap import RECIPE_DIR`.
+COPY ralph_bootstrap.py /app/ralph_bootstrap.py
 
 WORKDIR /app
 

@@ -267,6 +267,56 @@ class BittensorChain(ChainInterface):
             )
         return True, "handshake verified on-chain"
 
+    # ------------------------------------------------------------------
+    # Ninja-style (SN66) one-commitment-per-hotkey submission anchoring.
+    # Content-addressed + readable, vs the opaque/race-prone handshake above.
+    # Additive: these do NOT change the legacy op1 path — the validator is
+    # switched over to verify_submission_commitment_onchain in a coordinated
+    # cutover (see feat/ninja-commitment rollout notes).
+    # ------------------------------------------------------------------
+    def commit_submission(self, miner_hotkey: str, bundle_sha256: str) -> str:
+        """Miner side: anchor the CURRENT submission as a content-addressed
+        commitment in this hotkey's single on-chain slot. Overwriting is the
+        update mechanism — no nonce, no race. Returns the committed string.
+        """
+        from .submission_commitment import build_commitment
+
+        commitment = build_commitment(bundle_sha256, hotkey=miner_hotkey)
+        try:
+            self.subtensor.set_commitment(
+                wallet=self.wallet,
+                netuid=self.netuid,
+                data=commitment,
+            )
+            print(f"[chain] submission committed on-chain: {commitment}")
+        except AttributeError:
+            raise RuntimeError(
+                "bittensor SDK has no set_commitment method (expected on bittensor>=10.0)."
+            )
+        except Exception as e:
+            raise RuntimeError(f"on-chain submission commit failed: {type(e).__name__}: {e}")
+        return commitment
+
+    def verify_submission_commitment_onchain(
+        self, miner_hotkey: str, bundle_sha256: str
+    ) -> tuple[bool, str]:
+        """Validator side: does this hotkey's on-chain commitment name THIS
+        bundle? Reads the single commitment slot (the miner's current submission)
+        and checks it is the readable, content-addressed pointer to bundle_sha256.
+        """
+        from .submission_commitment import verify_commitment
+
+        uid = self.get_uid(miner_hotkey)
+        if uid is None:
+            return False, "hotkey not registered on subnet"
+        try:
+            committed = self.subtensor.get_commitment(netuid=self.netuid, uid=uid)
+        except Exception as e:
+            return False, f"get_commitment failed: {type(e).__name__}: {e}"
+        if not committed:
+            return False, "no on-chain submission commitment for this hotkey"
+        return verify_commitment(str(committed).strip(), hotkey=miner_hotkey, bundle_sha256=bundle_sha256)
+
     def is_hotkey_registered(self, hotkey: str) -> bool:
         """Check if a hotkey is registered on the subnet's metagraph."""
         self.sync()
@@ -383,20 +433,7 @@ class BittensorChain(ChainInterface):
         path = self.chain_dir / "king.json"
         if not path.exists():
             return None
-        d = json.loads(path.read_text())
-        return KingRecord(
-            miner_hotkey=d["miner_hotkey"],
-            bundle_hash=d["bundle_hash"],
-            val_bpb=d["val_bpb"],
-            benchmark_accuracy=d.get("benchmark_accuracy", 0.0),
-            compute_cost=d.get("compute_cost_h100h", 0.0),
-            crowned_at=d.get("crowned_at", 0.0),
-            crowned_at_block=d.get("crowned_at_block", 0),
-            proof_dir=d.get("proof_dir"),
-            previous_king=d.get("previous_king"),
-            king_attestation_hash=d.get("king_attestation_hash", ""),
-            parent_king_attestation_hash=d.get("parent_king_attestation_hash"),
-        )
+        return KingRecord.from_dict(json.loads(path.read_text()))
 
     def set_king(self, king: KingRecord) -> None:
         """Persist the new king to off-chain state.
