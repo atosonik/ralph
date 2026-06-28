@@ -208,7 +208,6 @@ def run_sandbox_grid_eval(
 
     topk_vals = np.zeros((m, k), dtype=np.float32)
     topk_idx = np.zeros((m, k), dtype=np.int64)
-    lse = np.zeros(m, dtype=np.float32)
     with torch.no_grad():
         for s in range(0, m, batch_size):
             inp = torch.from_numpy(idx_grid[s : s + batch_size].astype(np.int64)).to(device)
@@ -219,7 +218,6 @@ def run_sandbox_grid_eval(
             vals, idx = torch.topk(scored_logits, k, dim=-1)
             topk_vals[s : s + inp.size(0)] = vals.float().cpu().numpy()
             topk_idx[s : s + inp.size(0)] = idx.long().cpu().numpy()
-            lse[s : s + inp.size(0)] = torch.logsumexp(scored_logits, dim=-1).float().cpu().numpy()
 
     benchmark_accuracy = 0.0
     benchmark_examples = 0
@@ -233,7 +231,9 @@ def run_sandbox_grid_eval(
     out_dir.mkdir(parents=True, exist_ok=True)
     np.save(out_dir / "topk_logits.npy", topk_vals)
     np.save(out_dir / "topk_indices.npy", topk_idx)
-    np.save(out_dir / "logsumexp.npy", lse)
+    # NO logsumexp emitted: the HOST computes Z_hat = logsumexp(emitted top-K)
+    # itself (a lower bound on the true partition function), so a container can't
+    # forge the denominator to deflate cross-entropy.
     manifest = {
         "status": "ok",
         "mode": "hosb_grid_topk",
@@ -249,7 +249,7 @@ def run_sandbox_grid_eval(
         },
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest))
-    return topk_vals, topk_idx, lse
+    return topk_vals, topk_idx
 
 
 def run_prepare_and_eval(

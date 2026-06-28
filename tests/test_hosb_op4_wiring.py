@@ -128,51 +128,80 @@ def test_sandbox_grid_eval_is_leak_free_and_matches_direct(tmp_path):
     man = json.loads((out / "manifest.json").read_text())
     assert man["mode"] == "hosb_grid_topk" and man["rows"] == idx.shape[0]
 
+    assert not (out / "logsumexp.npy").exists()  # no container partition function
     targets = tgt[rows, scored_idx]
     ce = ce_from_topk_logits(
-        np.load(out / "topk_logits.npy"), np.load(out / "topk_indices.npy"),
-        np.load(out / "logsumexp.npy"), targets, cfg.vocab_size,
+        np.load(out / "topk_logits.npy"), np.load(out / "topk_indices.npy"), targets, cfg.vocab_size,
     )
     direct = per_position_nlls_blanked(model, idx, tgt)[rows, scored_idx]
     assert np.allclose(ce, direct, atol=1e-4)
 
 
 def test_ce_from_topk_exact_when_target_in_topk():
-    from eval.host_reduce import ce_from_topk_logits
-
-    # 1 row, vocab 5, full top-K (K=V) → exact CE against any target.
-    logits = np.array([[2.0, 1.0, 0.0, -1.0, -2.0]])
+    # full top-K (K=V): Z_hat = host logsumexp over all logits → exact CE.
     import torch
+
+    from eval.host_reduce import ce_from_topk_logits
+    logits = np.array([[2.0, 1.0, 0.0, -1.0, -2.0]])
     lse = torch.logsumexp(torch.tensor(logits), dim=-1).numpy()
     order = np.argsort(-logits, axis=1)
     tv = np.take_along_axis(logits, order, axis=1)
-    ce = ce_from_topk_logits(tv, order, lse, targets=np.array([2]), vocab_size=5)
+    ce = ce_from_topk_logits(tv, order, targets=np.array([2]), vocab_size=5)
     assert ce[0] == pytest.approx(lse[0] - logits[0, 2], rel=1e-6)
+
+
+def test_ce_uniform_logit_shift_invariant():
+    """CE is invariant to a uniform shift of all emitted logits (Z_hat and the
+    target logit shift together) — kills the rescale forgery."""
+    from eval.host_reduce import ce_from_topk_logits
+
+    tv = np.array([[3.0, 1.0, 0.0]])
+    ti = np.array([[7, 2, 5]])
+    base = ce_from_topk_logits(tv, ti, np.array([7]), vocab_size=50)
+    shifted = ce_from_topk_logits(tv + 12.5, ti, np.array([7]), vocab_size=50)
+    assert np.allclose(base, shifted, atol=1e-9)
+
+
+def test_ce_from_topk_host_owns_partition_no_logsumexp_param():
+    """The container can no longer supply a logsumexp to deflate CE — the host
+    computes Z_hat = logsumexp(emitted top-K) itself. A degenerate emission (one
+    real token + filler) self-defeats: a missed target carries a HUGE boundary CE."""
+    # honest near-full top-K → exact-ish CE on a hit
+    import torch
+
+    from eval.host_reduce import ce_from_topk_logits
+    logits = np.array([[5.0, 4.0, 3.0, 2.0]])
+    lse = torch.logsumexp(torch.tensor(logits), dim=-1).numpy()[0]
+    ce_hit = ce_from_topk_logits(logits, np.array([[0, 1, 2, 3]]), np.array([1]), vocab_size=1000)
+    assert ce_hit[0] == pytest.approx(lse - 4.0, rel=1e-6)
+    # degenerate emission: rank-1 high + filler-low; a missed target → huge miss CE
+    ce_miss = ce_from_topk_logits(np.array([[20.0, -30.0]]), np.array([[0, 1]]), np.array([999]), vocab_size=1000)
+    assert ce_miss[0] > 40.0  # z_hat(~20) - min(-30) ~ 50 nats → self-defeating
 
 
 def test_ce_from_topk_rejects_impossible_emissions():
     from eval.host_reduce import ce_from_topk_logits
 
-    lse = np.array([5.0])
     tgt = np.array([0])
     with pytest.raises(ValueError, match="outside"):  # index out of [0, V)
-        ce_from_topk_logits(np.array([[1.0, 0.0]]), np.array([[0, 999]]), lse, tgt, vocab_size=5)
+        ce_from_topk_logits(np.array([[1.0, 0.0]]), np.array([[0, 999]]), tgt, vocab_size=5)
     with pytest.raises(ValueError, match="duplicate"):  # repeated index inflates coverage
-        ce_from_topk_logits(np.array([[1.0, 0.0]]), np.array([[2, 2]]), lse, tgt, vocab_size=5)
-    with pytest.raises(ValueError, match="impossible"):  # logsumexp shrunk to deflate CE
-        ce_from_topk_logits(np.array([[10.0, 9.0]]), np.array([[0, 1]]), np.array([0.0]), tgt, vocab_size=5)
+        ce_from_topk_logits(np.array([[1.0, 0.0]]), np.array([[2, 2]]), tgt, vocab_size=5)
+    with pytest.raises(ValueError, match="non-finite"):
+        ce_from_topk_logits(np.array([[np.inf, 0.0]]), np.array([[0, 1]]), tgt, vocab_size=5)
 
 
 def test_hosb_sandbox_pins_vocab_from_checkpoint_not_manifest(tmp_path, monkeypatch):
-    """The miss-branch penalty log((V-K)/tail) uses the HOST checkpoint vocab, NOT
-    the container manifest — so a forged manifest vocab cannot deflate val_bpb."""
+    """The container manifest's vocab is never used in scoring — V comes from the
+    HOST checkpoint config (index-range validation only; CE uses the host-built
+    Z_hat). A forged manifest vocab changes nothing."""
     import validator.sandbox as sbx
     from validator.sandbox import SandboxResult
     from validator.sandbox_eval import run_sandbox_grid_eval
 
     ralph_root, proof, cfg, _model = _setup_submission(tmp_path)
     monkeypatch.setenv("RALPH_SANDBOX_IMAGE", "ralph-eval-sandbox@sha256:" + "a" * 64)
-    monkeypatch.setenv("RALPH_HOSB_TOPK", "8")  # K < vocab(64) → miss cells exist, so V matters
+    monkeypatch.setenv("RALPH_HOSB_TOPK", "8")  # K < vocab(64) → miss cells exist
     tokens = np.fromfile(ralph_root / "eval" / "private" / "active_tokens.bin", dtype=np.uint16)
     L = pinned_eval_seq_len(cfg.max_seq_len)
     idx, tgt, _layout = build_blanked_grid(tokens, tokens, L, b"s", n_scored_per_window=4)
@@ -198,21 +227,6 @@ def test_hosb_sandbox_pins_vocab_from_checkpoint_not_manifest(tmp_path, monkeypa
     assert np.allclose(a, b)
 
 
-def test_ce_from_topk_penalizes_target_missing_from_topk():
-    """The leak-free anti-cheat: a producer confidently ranking K WRONG tokens
-    (the real target absent from its top-K, since it can't see the target) is
-    PENALISED with a high CE, not rewarded with a low one."""
-    from eval.host_reduce import ce_from_topk_logits
-
-    # K=2 of a vocab-1000 model; the producer is very confident on tokens 0 and 1,
-    # but the real target is 999 (not in the top-K).
-    tv = np.array([[20.0, 19.0]])
-    ti = np.array([[0, 1]])
-    import torch
-    # logsumexp dominated by the two huge logits → tail mass ~0.
-    lse = torch.logsumexp(torch.tensor([[20.0, 19.0]]), dim=-1).numpy()
-    ce = ce_from_topk_logits(tv, ti, lse, targets=np.array([999]), vocab_size=1000)
-    assert ce[0] > 10.0  # heavily penalised, NOT a low (cheating) value
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +273,7 @@ def test_op4_enforce_requires_ack_else_fails_closed(tmp_path, monkeypatch):
     monkeypatch.delenv("RALPH_HOSB_ENFORCE_ACK", raising=False)
     monkeypatch.setattr(vv, "_hosb_sandbox_nlls", lambda *a, **k: pytest.fail("HOSB ran without ack"))
     ok, detail, result = vv.op4_hidden_eval(ralph_root, proof, chain=LocalChain(tmp_path / "chain"))
-    assert not ok and result is None and "not cheat-proof" in detail
+    assert not ok and result is None and "cheat-proof" in detail
 
 
 def test_op4_enforce_crowns_hosb(tmp_path, monkeypatch):

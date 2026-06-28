@@ -930,7 +930,9 @@ def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid):
         raise SandboxUnavailable("HOSB requires a pinned RALPH_SANDBOX_IMAGE (name@sha256:… or sha256:…)")
     gpu = int(os.environ.get("RALPH_SANDBOX_GPU", "0")) if torch.cuda.is_available() else None
     cfg = SandboxConfig(image=image, gpu_device=gpu)
-    top_k = int(os.environ.get("RALPH_HOSB_TOPK", "256"))
+    # Large K so the residual lower-bound-Z deflation (-log(1-tail_K)) stays under
+    # the crown margin; calibrate per shard on-box (heavy-tail/low-bpt → larger K).
+    top_k = int(os.environ.get("RALPH_HOSB_TOPK", "4096"))
 
     idx_grid = np.asarray(idx_grid)
     tgt_grid = np.asarray(tgt_grid)
@@ -964,25 +966,24 @@ def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid):
         if res.returncode != 0:
             raise RuntimeError(f"HOSB grid container failed (rc={res.returncode}): {res.stderr[-300:]}")
         mpath = out_dir / "manifest.json"
-        needed = [out_dir / f for f in ("topk_logits.npy", "topk_indices.npy", "logsumexp.npy")]
+        needed = [out_dir / f for f in ("topk_logits.npy", "topk_indices.npy")]
         if not (mpath.exists() and all(p.exists() for p in needed)):
-            raise RuntimeError("HOSB grid container produced no topk/logsumexp/manifest")
+            raise RuntimeError("HOSB grid container produced no topk_logits/topk_indices/manifest")
         manifest = json.loads(mpath.read_text())
         # V is HOST-pinned from the checkpoint config (== the model's real lm_head
-        # width — a miner can't forge it low without breaking load_state_dict, and
-        # it's vocab-enforced to RALPH_VOCAB_SIZE for real submissions). NEVER the
-        # container manifest: under-reporting V would collapse the no-target penalty
-        # log((V-K)/tail_mass) and forge a low val_bpb past both witnesses.
+        # width; vocab-enforced to RALPH_VOCAB_SIZE for real submissions), used ONLY
+        # to bound the emitted indices — never the container manifest. The partition
+        # function Z_hat is the HOST's own logsumexp over the emitted top-K (a lower
+        # bound on the true Z), so no container value can deflate cross-entropy.
         host_vocab = int(_safe_load_checkpoint_config(proof_dir / "training" / "checkpoint.pt")["vocab_size"])
         k_expected = min(top_k, host_vocab)
-        topk_logits, topk_idx, lse = (np.load(p) for p in needed)
+        topk_logits, topk_idx = (np.load(p) for p in needed)
         m = idx_grid.shape[0]
-        if topk_logits.shape != (m, k_expected) or topk_idx.shape != (m, k_expected) or lse.shape != (m,):
+        if topk_logits.shape != (m, k_expected) or topk_idx.shape != (m, k_expected):
             raise RuntimeError(
-                f"HOSB top-K shape mismatch: got {topk_logits.shape}/{topk_idx.shape}/{lse.shape}, "
-                f"expected ({m},{k_expected})"
+                f"HOSB top-K shape mismatch: got {topk_logits.shape}/{topk_idx.shape}, expected ({m},{k_expected})"
             )
-        ce = ce_from_topk_logits(topk_logits, topk_idx, lse, targets, host_vocab)
+        ce = ce_from_topk_logits(topk_logits, topk_idx, targets, host_vocab)
         # Scatter the host-computed CE back to (M, L) at each row's scored column.
         nlls_2d = np.zeros(idx_grid.shape, dtype=np.float64)
         nlls_2d[rows, scored_idx] = ce
@@ -1145,8 +1146,10 @@ def op4_hidden_eval(
         import os
         if os.environ.get("RALPH_HOSB_ENFORCE_ACK", "0") != "1":
             return False, (
-                "HOSB enforce is not cheat-proof yet (logsumexp + benchmark forgeries open); "
-                "set RALPH_HOSB_ENFORCE_ACK=1 to override for testing, or use RALPH_HOSB=shadow"
+                "HOSB enforce is not fully cheat-proof yet: val_bpb partition is now host-owned "
+                "(lower-bound-Z), but the benchmark axis is still container-reported and the king "
+                "is not yet HOSB-re-scored; needs stage-4b + on-box calibration. Set "
+                "RALPH_HOSB_ENFORCE_ACK=1 to override for testing, or use RALPH_HOSB=shadow"
             ), None
         _seed, tag = _hosb_epoch_seed(chain, shard_fp, _bundle_fp(proof_dir))
         cache_fp = f"{shard_fp}|hosb-enforce|{tag or 'noentropy'}"
