@@ -1,0 +1,79 @@
+# Ralph validator EXECUTION SANDBOX image.
+#
+# This is NOT the proof-test/measurement image (that is ./Dockerfile, whose
+# digest is the on-chain measurement). This image exists only so the validator
+# can run UNTRUSTED miner model code in containment for op4 hidden-eval (and,
+# later, the re-train audit). It is pinned by digest and verified by
+# validator/sandbox.py:preflight().
+#
+# Hardening choices vs the proof image:
+#   - cuda RUNTIME, not devel: no nvcc/headers.
+#   - NO git, NO compilers: shrink the in-container attack surface.
+#   - eval/scoring CODE is baked (canonical); the rotating eval/private DATA is
+#     NEVER baked — it is a read-only mount at run time, so the moat is not in
+#     the image layers.
+#   - runs as a non-root user; the container is additionally launched with
+#     --network none --read-only --cap-drop ALL --user 65534 etc. by run_in_sandbox.
+#
+# Build (reproducible; pin the result by digest in SandboxConfig.image):
+#   DOCKER_BUILDKIT=1 docker build -f Dockerfile.sandbox -t ralph-eval-sandbox:$(git rev-parse --short HEAD) .
+#   docker inspect --format='{{index .RepoDigests 0}}' ralph-eval-sandbox:...   # -> @sha256: for SandboxConfig
+#
+# Run contract (the host's run_in_sandbox supplies the hardening flags + mounts):
+#   /canon                       (ro)  canonical recipe tree (model/, ...)
+#   /in/patch.diff               (ro)  miner patch
+#   /in/training/checkpoint.pt   (ro)  miner checkpoint
+#   /eval-private/...            (ro)  held-out shard + benchmark (never baked)
+#   /out                         (rw)  nlls.npy + manifest.json
+# Entrypoint:  python -m validator.sandbox_eval /canon /in/patch.diff \
+#              /in/training/checkpoint.pt /eval-private /out
+# It applies the patch in a tmpfs workdir, runs the (patched) model, and emits
+# per-position NLLs + benchmark accuracy; the HOST reduces the crown-critical
+# val_bpb from the NLLs and computes the eval-set hash itself.
+
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# `patch` is required by proof.runner.apply_patch; explicitly NO git / NO gcc.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    patch \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.11 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY pyproject.toml /app/pyproject.toml
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu124 && \
+    pip install --no-cache-dir -e /app
+
+# Canonical CODE only — model/recipe/eval/proof/validator. NO eval/private DATA
+# (the .dockerignore excludes it; it is a runtime ro mount).
+COPY model/ /app/model/
+COPY recipe/ /app/recipe/
+COPY data/ /app/data/
+COPY eval/ /app/eval/
+COPY calibration/ /app/calibration/
+COPY proof/ /app/proof/
+COPY validator/ /app/validator/
+COPY configs/ /app/configs/
+COPY restricted_files.yaml /app/restricted_files.yaml
+COPY ralph_bootstrap.py /app/ralph_bootstrap.py
+
+WORKDIR /app
+
+# Verify the entrypoint + reducer import cleanly at build time.
+RUN python -c "from validator.sandbox_eval import run_sandbox_eval, prepare_workdir; print('sandbox_eval import ok')"
+RUN python -c "from eval.host_reduce import reduce_token_nlls; from eval.val_bpb import per_position_nlls; print('reducer import ok')"
+
+# Non-root by default (run_in_sandbox also forces --user); 65534 = nobody.
+USER 65534:65534
+
+ENTRYPOINT ["python", "-m", "validator.sandbox_eval"]
+CMD ["--help"]

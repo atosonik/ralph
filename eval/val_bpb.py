@@ -140,6 +140,57 @@ def compute_val_bpb(
     }
 
 
+def per_position_nlls(
+    model: torch.nn.Module,
+    eval_tokens: np.ndarray,
+    seq_len: int,
+    batch_size: int = 8,
+    device: torch.device | None = None,
+) -> np.ndarray:
+    """Per-position cross-entropy (nats) over the held-out stream, in the SAME
+    window-row-major order `compute_val_bpb` sums.
+
+    This is the producer side of HOST-side reduction: the sandboxed (untrusted)
+    miner model emits this array; the validator reduces it with
+    `eval.host_reduce.reduce_token_nlls` instead of trusting a miner-printed
+    bpb. `reduce_token_nlls(per_position_nlls(model, ...))` reproduces
+    `compute_val_bpb(model, ...)["val_bpb"]` exactly (tested).
+
+    Returns a float32 1-D array of length `n_full_windows * seq_len`.
+    """
+    if device is None:
+        device = next(model.parameters()).device
+    model.eval()
+    n = len(eval_tokens)
+    n_windows = max(1, (n - 1) // seq_len)
+    chunks: list[np.ndarray] = []
+    with torch.no_grad():
+        batch_inp: list[torch.Tensor] = []
+        batch_tgt: list[torch.Tensor] = []
+        for w in range(n_windows):
+            start = w * seq_len
+            ids = eval_tokens[start : start + seq_len + 1]
+            if len(ids) < seq_len + 1:
+                break
+            batch_inp.append(torch.from_numpy(ids[:-1].astype(np.int64)))
+            batch_tgt.append(torch.from_numpy(ids[1:].astype(np.int64)))
+            if len(batch_inp) == batch_size or w == n_windows - 1:
+                inp = torch.stack(batch_inp).to(device)
+                tgt = torch.stack(batch_tgt).to(device)
+                logits, _ = model(inp)
+                nll = F.cross_entropy(
+                    logits.view(-1, logits.size(-1)),
+                    tgt.reshape(-1),
+                    reduction="none",
+                )
+                chunks.append(nll.detach().float().cpu().numpy())
+                batch_inp.clear()
+                batch_tgt.clear()
+    if not chunks:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(chunks).astype(np.float32)
+
+
 def compute_val_bpb_on_stream(
     model: torch.nn.Module,
     batch: SealedStreamBatch,
