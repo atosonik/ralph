@@ -39,6 +39,28 @@ if TYPE_CHECKING:
 # and for Phase 0 smoke tests that don't construct a sealed pool.
 DEFAULT_BYTES_PER_TOKEN = 4.0
 
+# Validator-pinned hidden-eval window. The eval MUST NOT derive its sequence
+# length from the miner's checkpoint config (the old `cfg.max_seq_len // 2`): a
+# miner could enlarge max_seq_len to be scored against an easier, longer-context
+# eval than the king faced, and every model evaluated on a different window is
+# not comparable. Pinning to a FIXED window makes all models comparable and
+# removes a miner lever. This is a CANONICAL (image-baked / installed) constant —
+# in the sandbox it is read from the trusted eval package, never miner-supplied.
+EVAL_SEQ_LEN = 512
+
+
+def pinned_eval_seq_len(model_max_seq_len: int) -> int:
+    """The validator-pinned hidden-eval window: ``min(EVAL_SEQ_LEN, max_seq_len)``,
+    floored at 2 (compute_val_bpb needs seq_len+1 tokens per window).
+
+    Single source of truth so EVERY eval path (in-process, subprocess, sandbox,
+    audit) pins seq_len identically and the host can independently re-derive and
+    verify the value a container echoes. The cap at the model's own max_seq_len
+    lets small-context models still load; the floor at EVAL_SEQ_LEN means no
+    miner can choose a window LARGER than the validator's.
+    """
+    return max(2, min(EVAL_SEQ_LEN, int(model_max_seq_len)))
+
 
 def compute_val_bpb(
     model: torch.nn.Module,

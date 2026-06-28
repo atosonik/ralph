@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from model import RalphBase, RalphConfig
 
 from eval import run_hidden_eval
+from eval.val_bpb import pinned_eval_seq_len
 from proof.runner import run_proof_test
 
 
@@ -116,7 +117,7 @@ def run_audit(
         model = model.cuda()
     eval_result = run_hidden_eval(
         model, ralph_root / "eval" / "private",
-        seq_len=cfg.max_seq_len // 2,
+        seq_len=pinned_eval_seq_len(cfg.max_seq_len),
     )
 
     # Hidden-eval on the miner's checkpoint for comparison — same SAFE loader.
@@ -128,7 +129,7 @@ def run_audit(
         miner_model = miner_model.cuda()
     miner_eval = run_hidden_eval(
         miner_model, ralph_root / "eval" / "private",
-        seq_len=cfg.max_seq_len // 2,
+        seq_len=pinned_eval_seq_len(cfg.max_seq_len),
     )
 
     miner_bpb = miner_eval.val_bpb
