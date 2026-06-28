@@ -58,12 +58,26 @@ def test_argv_has_all_mandatory_flags():
 
 
 def test_argv_rejects_unpinned_image():
-    with pytest.raises(ValueError, match="digest"):
+    with pytest.raises(ValueError, match="pinned"):
         build_docker_argv(
             SandboxConfig(image="ralph-eval-sandbox:latest"),
             container_argv=["true"], mounts=[], out_dir=Path("/tmp/o"),
             name="x", env={},
         )
+
+
+def test_is_pinned_image_accepts_digest_and_local_id():
+    assert sbx.is_pinned_image("ralph-eval-sandbox@sha256:" + "a" * 64)  # registry digest
+    assert sbx.is_pinned_image("sha256:" + "b" * 64)                      # local image id
+    assert not sbx.is_pinned_image("ralph-eval-sandbox:latest")           # tag
+    assert not sbx.is_pinned_image("sha256:" + "c" * 12)                  # short id
+    assert not sbx.is_pinned_image("")
+
+
+def test_argv_accepts_local_image_id():
+    # A locally-built image pinned by its image ID (no registry push) is valid.
+    argv = _build(cfg=SandboxConfig(image="sha256:" + "d" * 64))
+    assert "sha256:" + "d" * 64 in argv
 
 
 def test_argv_rejects_gpus_all_and_forbidden_flags():
