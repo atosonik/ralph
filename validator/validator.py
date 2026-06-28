@@ -642,7 +642,7 @@ def _sandboxed_hidden_eval(
     )
     from eval.val_bpb import DEFAULT_BYTES_PER_TOKEN, load_eval_tokens
     from ralph_bootstrap import RECIPE_DIR
-    from validator.sandbox import Mount, SandboxConfig, SandboxUnavailable, run_in_sandbox
+    from validator.sandbox import Mount, SandboxConfig, SandboxUnavailable, is_pinned_image, run_in_sandbox
 
     ckpt_path = proof_dir / "training" / "checkpoint.pt"
     eval_dir = ralph_root / "eval" / "private"
@@ -652,8 +652,8 @@ def _sandboxed_hidden_eval(
         return False, f"missing held-out shard at {eval_dir}", None
 
     image = os.environ.get("RALPH_SANDBOX_IMAGE", "")
-    if "@sha256:" not in image:
-        return False, "RALPH_SANDBOX=1 but RALPH_SANDBOX_IMAGE is not a digest-pinned image", None
+    if not is_pinned_image(image):
+        return False, "RALPH_SANDBOX=1 but RALPH_SANDBOX_IMAGE is not pinned (need name@sha256:… or sha256:…)", None
     gpu = int(os.environ.get("RALPH_SANDBOX_GPU", "0")) if torch.cuda.is_available() else None
     cfg = SandboxConfig(image=image, gpu_device=gpu)
 

@@ -44,6 +44,16 @@ MIN_TOOLKIT_VERSION = (1, 17, 8)
 # Flags that must NEVER appear in a sandbox invocation.
 FORBIDDEN_FLAGS = ("--privileged", "--pid=host", "--net=host", "--network=host", "--userns=host")
 
+# A content-pinned image reference: either a registry digest
+# (name@sha256:<64hex>) OR a bare local image ID (sha256:<64hex>). Both are
+# content hashes — tamper-evident — so a locally-built sandbox image can be
+# pinned without pushing it to a registry first.
+_PINNED_IMAGE_RE = re.compile(r"(?:^|@)sha256:[0-9a-f]{64}$")
+
+
+def is_pinned_image(image: str) -> bool:
+    return bool(_PINNED_IMAGE_RE.search((image or "").strip()))
+
 _RESULT_RE = re.compile(r"^RALPH_EVAL_RESULT ")
 
 
@@ -66,7 +76,7 @@ class Mount:
 @dataclass(frozen=True)
 class SandboxConfig:
     """Tunables for one sandboxed run. `image` MUST be pinned by digest."""
-    image: str  # e.g. "ralph-eval-sandbox@sha256:..."
+    image: str  # pinned: "ralph-eval-sandbox@sha256:..." or local id "sha256:..."
     gpu_device: int | None = 0  # a SINGLE device index, or None for CPU-only
     memory: str = "16g"
     cpus: str = "8"
@@ -118,8 +128,8 @@ def build_docker_argv(
 ) -> list[str]:
     """Build the hardened `docker run` argv. Raises on any unsafe input so a
     mistake is a crash, not a silent weakening of the boundary."""
-    if "@sha256:" not in cfg.image:
-        raise ValueError(f"sandbox image must be pinned by digest, got {cfg.image!r}")
+    if not is_pinned_image(cfg.image):
+        raise ValueError(f"sandbox image must be pinned by digest or image-id, got {cfg.image!r}")
     if cfg.gpu_device is not None and cfg.gpu_device < 0:
         raise ValueError("gpu_device must be a non-negative index or None")
     for k in env:
@@ -263,8 +273,8 @@ def _check_nvidia_toolkit(reasons: list[str], require_gpu: bool) -> None:
 
 
 def _check_image(reasons: list[str], image: str) -> None:
-    if "@sha256:" not in image:
-        reasons.append(f"sandbox image not pinned by digest: {image}")
+    if not is_pinned_image(image):
+        reasons.append(f"sandbox image not pinned by digest or image-id: {image}")
         return
     res = _run(["docker", "image", "inspect", image])
     if res.returncode != 0:
