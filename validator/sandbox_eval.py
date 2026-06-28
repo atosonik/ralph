@@ -61,12 +61,12 @@ def prepare_workdir(canon_dir: Path, patch_path: Path, dest_workdir: Path) -> Pa
 def run_sandbox_eval(
     workdir: Path,
     ckpt_path: Path,
-    eval_tokens_path: Path,
+    eval_dir: Path,
     out_dir: Path,
     *,
     batch_size: int = 8,
 ):
-    """Produce per-position NLLs for the host to reduce. Returns the np.ndarray.
+    """Produce per-position NLLs (for host val_bpb reduction) + benchmark accuracy.
 
     Importable + unit-testable in-process (no container) so the produce→reduce
     equivalence can be proven on CPU.
@@ -75,6 +75,7 @@ def run_sandbox_eval(
 
     # Trusted helpers FIRST (canonical/installed), before the workdir goes on the
     # path — miner code in workdir must not be able to shadow the reducer.
+    from eval.benchmark import compute_benchmark_score
     from eval.val_bpb import load_eval_tokens, per_position_nlls
 
     sys.path.insert(0, str(Path(workdir).resolve()))
@@ -99,8 +100,21 @@ def run_sandbox_eval(
         model = model.cuda()
 
     seq_len = cfg.max_seq_len // 2
-    tokens = np.asarray(load_eval_tokens(eval_tokens_path))
+    eval_dir = Path(eval_dir)
+    tokens = np.asarray(load_eval_tokens(eval_dir / "active_tokens.bin"))
     nlls = per_position_nlls(model, tokens, seq_len, batch_size)
+
+    # Benchmark accuracy — cheap (the ~1.5k held-out examples, not the token
+    # stream). Contained but miner-computed; the crown-critical val_bpb is the
+    # one the HOST reduces from nlls. No benchmark file -> 0.0.
+    benchmark_accuracy = 0.0
+    benchmark_examples = 0
+    bpath = eval_dir / "active_benchmark.json"
+    if bpath.exists():
+        examples = json.loads(bpath.read_text())
+        bench = compute_benchmark_score(model, examples)
+        benchmark_accuracy = float(bench["benchmark_accuracy"])
+        benchmark_examples = int(bench["n_examples"])
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -109,6 +123,8 @@ def run_sandbox_eval(
         "status": "ok",
         "seq_len": int(seq_len),
         "tokens_emitted": int(nlls.shape[0]),
+        "benchmark_accuracy": benchmark_accuracy,
+        "benchmark_examples": benchmark_examples,
         "model_config": {
             "vocab_size": cfg.vocab_size,
             "dim": cfg.dim,
@@ -120,16 +136,33 @@ def run_sandbox_eval(
     return nlls
 
 
+def run_prepare_and_eval(
+    canon_dir: Path,
+    patch_path: Path,
+    ckpt_path: Path,
+    eval_dir: Path,
+    out_dir: Path,
+    *,
+    batch_size: int = 8,
+):
+    """Full container flow: prepare the patched workdir IN here (traversal
+    contained), then eval. The host-side runner calls this via __main__."""
+    import tempfile
+
+    workdir = prepare_workdir(canon_dir, patch_path, Path(tempfile.mkdtemp(prefix="ralph_sbx_")) / "workdir")
+    return run_sandbox_eval(workdir, ckpt_path, eval_dir, out_dir, batch_size=batch_size)
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 5:
-        print(f"usage: {argv[0]} <workdir> <ckpt_path> <eval_tokens_path> <out_dir>", file=sys.stderr)
+    if len(argv) != 6:
+        print(f"usage: {argv[0]} <canon_dir> <patch.diff> <ckpt_path> <eval_dir> <out_dir>", file=sys.stderr)
         return 3
-    workdir, ckpt_path, eval_tokens_path, out_dir = (Path(a) for a in argv[1:5])
-    if not workdir.is_dir() or not ckpt_path.is_file() or not eval_tokens_path.is_file():
-        print("ERROR: workdir/ckpt/eval-tokens must exist", file=sys.stderr)
+    canon_dir, patch_path, ckpt_path, eval_dir, out_dir = (Path(a) for a in argv[1:6])
+    if not canon_dir.is_dir() or not ckpt_path.is_file() or not eval_dir.is_dir():
+        print("ERROR: canon_dir/ckpt/eval_dir must exist", file=sys.stderr)
         return 3
     try:
-        run_sandbox_eval(workdir, ckpt_path, eval_tokens_path, out_dir)
+        run_prepare_and_eval(canon_dir, patch_path, ckpt_path, eval_dir, out_dir)
     except (ImportError, KeyError, RuntimeError) as e:
         print(f"ERROR: setup/load failed: {e}", file=sys.stderr)
         return 1

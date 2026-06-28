@@ -562,10 +562,107 @@ def _patched_hidden_eval(
         )
 
 
+def _sandboxed_hidden_eval(
+    ralph_root: Path,
+    proof_dir: Path,
+) -> tuple[bool, str, HiddenEvalResult | None]:
+    """op4 hidden-eval run inside the hardened container (RALPH_SANDBOX=1).
+
+    The miner's (possibly patched) model executes contained — no network, no
+    secrets, non-root. The container emits per-position NLLs + benchmark
+    accuracy; the HOST reduces the crown-critical val_bpb from the NLLs and
+    computes the eval-set hash itself. FAIL-CLOSED: if the sandbox runtime can't
+    be verified, the submission is rejected — never a bare-exec fallback.
+    """
+    import os
+    import tempfile
+
+    import numpy as np
+
+    from eval.host_reduce import (
+        expected_token_count,
+        hash_target_stream,
+        reduce_token_nlls,
+    )
+    from eval.val_bpb import DEFAULT_BYTES_PER_TOKEN, load_eval_tokens
+    from ralph_bootstrap import RECIPE_DIR
+    from validator.sandbox import Mount, SandboxConfig, SandboxUnavailable, run_in_sandbox
+
+    ckpt_path = proof_dir / "training" / "checkpoint.pt"
+    eval_dir = ralph_root / "eval" / "private"
+    if not ckpt_path.exists():
+        return False, f"missing checkpoint at {ckpt_path}", None
+    if not (eval_dir / "active_tokens.bin").exists():
+        return False, f"missing held-out shard at {eval_dir}", None
+
+    image = os.environ.get("RALPH_SANDBOX_IMAGE", "")
+    if "@sha256:" not in image:
+        return False, "RALPH_SANDBOX=1 but RALPH_SANDBOX_IMAGE is not a digest-pinned image", None
+    gpu = int(os.environ.get("RALPH_SANDBOX_GPU", "0")) if torch.cuda.is_available() else None
+    cfg = SandboxConfig(image=image, gpu_device=gpu)
+
+    out_dir = Path(tempfile.mkdtemp(prefix="ralph_sbx_out_"))
+    mounts = [
+        Mount(Path(RECIPE_DIR), "/canon", ro=True),
+        Mount(proof_dir, "/in", ro=True),
+        Mount(eval_dir, "/eval-private", ro=True),
+    ]
+    container_argv = [
+        "python", "-m", "validator.sandbox_eval",
+        "/canon", "/in/patch.diff", "/in/training/checkpoint.pt", "/eval-private", "/out",
+    ]
+    try:
+        res = run_in_sandbox(
+            cfg,
+            container_argv=container_argv,
+            mounts=mounts,
+            out_dir=out_dir,
+            timeout_s=int(os.environ.get("RALPH_SANDBOX_TIMEOUT_S", "900")),
+        )
+    except SandboxUnavailable as e:
+        return False, f"op4 sandbox unavailable (FAIL-CLOSED, not falling back): {e}", None
+    if res.returncode != 0:
+        return False, f"op4 sandbox eval failed (rc={res.returncode}): {res.stderr[-300:]}", None
+
+    nll_path = out_dir / "nlls.npy"
+    man_path = out_dir / "manifest.json"
+    if not (nll_path.exists() and man_path.exists()):
+        return False, "op4 sandbox produced no nlls/manifest output", None
+
+    manifest = json.loads(man_path.read_text())
+    seq_len = int(manifest["seq_len"])
+    tokens = np.asarray(load_eval_tokens(eval_dir / "active_tokens.bin"))
+    eval_set_hash = hash_target_stream(tokens)  # HOST-computed, not miner-supplied
+    try:
+        reduced = reduce_token_nlls(
+            np.load(nll_path),
+            seq_len=seq_len,
+            bytes_per_token=DEFAULT_BYTES_PER_TOKEN,
+            expected_tokens=expected_token_count(len(tokens), seq_len),
+            eval_set_hash=eval_set_hash,
+        )
+    except ValueError as e:
+        return False, f"op4 host-reduction rejected the emitted nlls: {e}", None
+
+    result = HiddenEvalResult(
+        val_bpb=reduced.val_bpb,
+        benchmark_accuracy=round(float(manifest.get("benchmark_accuracy", 0.0)), 3),
+        tokens_evaluated=reduced.tokens_evaluated,
+        benchmark_examples=int(manifest.get("benchmark_examples", 0)),
+        eval_set_hash=eval_set_hash,
+        val_seq_len=seq_len,
+        tail_val_bpb=reduced.tail_val_bpb,
+    )
+    return True, f"val_bpb={result.val_bpb:.4f} bench={result.benchmark_accuracy:.3f} (sandboxed)", result
+
+
 def op4_hidden_eval(
     ralph_root: Path,
     proof_dir: Path,
 ) -> tuple[bool, str, HiddenEvalResult | None]:
+    import os
+    if os.environ.get("RALPH_SANDBOX", "0") == "1":
+        return _sandboxed_hidden_eval(ralph_root, proof_dir)
     ckpt_path = proof_dir / "training" / "checkpoint.pt"
     if not ckpt_path.exists():
         return False, f"missing checkpoint at {ckpt_path}", None

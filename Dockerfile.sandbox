@@ -20,11 +20,16 @@
 #   docker inspect --format='{{index .RepoDigests 0}}' ralph-eval-sandbox:...   # -> @sha256: for SandboxConfig
 #
 # Run contract (the host's run_in_sandbox supplies the hardening flags + mounts):
-#   /work/workdir       (rw tmpfs)  patched recipe tree, prepared in-container
-#   /in/checkpoint.pt   (ro)        miner checkpoint
-#   /eval-private/...   (ro)        held-out stream (mounted, never baked)
-#   /out                (rw)        nlls.npy + manifest.json
-#   entrypoint emits per-position NLLs; the HOST reduces them to val_bpb.
+#   /canon                       (ro)  canonical recipe tree (model/, ...)
+#   /in/patch.diff               (ro)  miner patch
+#   /in/training/checkpoint.pt   (ro)  miner checkpoint
+#   /eval-private/...            (ro)  held-out shard + benchmark (never baked)
+#   /out                         (rw)  nlls.npy + manifest.json
+# Entrypoint:  python -m validator.sandbox_eval /canon /in/patch.diff \
+#              /in/training/checkpoint.pt /eval-private /out
+# It applies the patch in a tmpfs workdir, runs the (patched) model, and emits
+# per-position NLLs + benchmark accuracy; the HOST reduces the crown-critical
+# val_bpb from the NLLs and computes the eval-set hash itself.
 
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS base
 
