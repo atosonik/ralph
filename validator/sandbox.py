@@ -148,6 +148,14 @@ def build_docker_argv(
     if cfg.gpu_device is not None:
         # A SINGLE pinned device. Never "all" — that exposes every GPU + the
         # full driver ioctl surface for every device.
+        #
+        # Documented residual: the container is ephemeral (--rm), so its CUDA
+        # context + VRAM are freed on exit, but freed VRAM is not guaranteed
+        # ZEROED before the next container reuses it. The eval set is mounted
+        # read-only into EVERY submission's container anyway, so reading a prior
+        # run's residual VRAM gives a miner nothing they don't already get — the
+        # only leak is a prior miner's model weights to a later one (low). The
+        # clean mitigation is driver/MIG-level scrub, not an in-band hack.
         argv += ["--gpus", f"device={cfg.gpu_device}"]
 
     for m in mounts:

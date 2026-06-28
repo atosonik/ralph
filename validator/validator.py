@@ -630,6 +630,7 @@ def _sandboxed_hidden_eval(
     be verified, the submission is rejected — never a bare-exec fallback.
     """
     import os
+    import shutil
     import tempfile
 
     import numpy as np
@@ -656,59 +657,66 @@ def _sandboxed_hidden_eval(
     gpu = int(os.environ.get("RALPH_SANDBOX_GPU", "0")) if torch.cuda.is_available() else None
     cfg = SandboxConfig(image=image, gpu_device=gpu)
 
+    # Per-submission host scratch for the container's /out. The container itself
+    # is ephemeral (docker --rm); this dir holds nlls.npy + manifest.json only
+    # long enough to host-reduce, then is removed on EVERY exit path (finally)
+    # so /tmp doesn't accumulate ~12 MB per submission.
     out_dir = Path(tempfile.mkdtemp(prefix="ralph_sbx_out_"))
-    mounts = [
-        Mount(Path(RECIPE_DIR), "/canon", ro=True),
-        Mount(proof_dir, "/in", ro=True),
-        Mount(eval_dir, "/eval-private", ro=True),
-    ]
-    container_argv = [
-        "python", "-m", "validator.sandbox_eval",
-        "/canon", "/in/patch.diff", "/in/training/checkpoint.pt", "/eval-private", "/out",
-    ]
     try:
-        res = run_in_sandbox(
-            cfg,
-            container_argv=container_argv,
-            mounts=mounts,
-            out_dir=out_dir,
-            timeout_s=int(os.environ.get("RALPH_SANDBOX_TIMEOUT_S", "900")),
-        )
-    except SandboxUnavailable as e:
-        return False, f"op4 sandbox unavailable (FAIL-CLOSED, not falling back): {e}", None
-    if res.returncode != 0:
-        return False, f"op4 sandbox eval failed (rc={res.returncode}): {res.stderr[-300:]}", None
+        mounts = [
+            Mount(Path(RECIPE_DIR), "/canon", ro=True),
+            Mount(proof_dir, "/in", ro=True),
+            Mount(eval_dir, "/eval-private", ro=True),
+        ]
+        container_argv = [
+            "python", "-m", "validator.sandbox_eval",
+            "/canon", "/in/patch.diff", "/in/training/checkpoint.pt", "/eval-private", "/out",
+        ]
+        try:
+            res = run_in_sandbox(
+                cfg,
+                container_argv=container_argv,
+                mounts=mounts,
+                out_dir=out_dir,
+                timeout_s=int(os.environ.get("RALPH_SANDBOX_TIMEOUT_S", "900")),
+            )
+        except SandboxUnavailable as e:
+            return False, f"op4 sandbox unavailable (FAIL-CLOSED, not falling back): {e}", None
+        if res.returncode != 0:
+            return False, f"op4 sandbox eval failed (rc={res.returncode}): {res.stderr[-300:]}", None
 
-    nll_path = out_dir / "nlls.npy"
-    man_path = out_dir / "manifest.json"
-    if not (nll_path.exists() and man_path.exists()):
-        return False, "op4 sandbox produced no nlls/manifest output", None
+        nll_path = out_dir / "nlls.npy"
+        man_path = out_dir / "manifest.json"
+        if not (nll_path.exists() and man_path.exists()):
+            return False, "op4 sandbox produced no nlls/manifest output", None
 
-    manifest = json.loads(man_path.read_text())
-    seq_len = int(manifest["seq_len"])
-    tokens = np.asarray(load_eval_tokens(eval_dir / "active_tokens.bin"))
-    eval_set_hash = hash_target_stream(tokens)  # HOST-computed, not miner-supplied
-    try:
-        reduced = reduce_token_nlls(
-            np.load(nll_path),
-            seq_len=seq_len,
-            bytes_per_token=DEFAULT_BYTES_PER_TOKEN,
-            expected_tokens=expected_token_count(len(tokens), seq_len),
+        manifest = json.loads(man_path.read_text())
+        seq_len = int(manifest["seq_len"])
+        tokens = np.asarray(load_eval_tokens(eval_dir / "active_tokens.bin"))
+        eval_set_hash = hash_target_stream(tokens)  # HOST-computed, not miner-supplied
+        try:
+            reduced = reduce_token_nlls(
+                np.load(nll_path),
+                seq_len=seq_len,
+                bytes_per_token=DEFAULT_BYTES_PER_TOKEN,
+                expected_tokens=expected_token_count(len(tokens), seq_len),
+                eval_set_hash=eval_set_hash,
+            )
+        except ValueError as e:
+            return False, f"op4 host-reduction rejected the emitted nlls: {e}", None
+
+        result = HiddenEvalResult(
+            val_bpb=reduced.val_bpb,
+            benchmark_accuracy=round(float(manifest.get("benchmark_accuracy", 0.0)), 3),
+            tokens_evaluated=reduced.tokens_evaluated,
+            benchmark_examples=int(manifest.get("benchmark_examples", 0)),
             eval_set_hash=eval_set_hash,
+            val_seq_len=seq_len,
+            tail_val_bpb=reduced.tail_val_bpb,
         )
-    except ValueError as e:
-        return False, f"op4 host-reduction rejected the emitted nlls: {e}", None
-
-    result = HiddenEvalResult(
-        val_bpb=reduced.val_bpb,
-        benchmark_accuracy=round(float(manifest.get("benchmark_accuracy", 0.0)), 3),
-        tokens_evaluated=reduced.tokens_evaluated,
-        benchmark_examples=int(manifest.get("benchmark_examples", 0)),
-        eval_set_hash=eval_set_hash,
-        val_seq_len=seq_len,
-        tail_val_bpb=reduced.tail_val_bpb,
-    )
-    return True, f"val_bpb={result.val_bpb:.4f} bench={result.benchmark_accuracy:.3f} (sandboxed)", result
+        return True, f"val_bpb={result.val_bpb:.4f} bench={result.benchmark_accuracy:.3f} (sandboxed)", result
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 # --- Hidden-eval result cache -------------------------------------------------

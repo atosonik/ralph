@@ -112,9 +112,16 @@ def test_op4_routes_through_sandbox_and_host_reduces(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sbx, "run_in_sandbox", fake_run_in_sandbox)
 
+    import glob
+    import tempfile as _tf
+    pat = _tf.gettempdir().rstrip("/") + "/ralph_sbx_out_*"
+    before = set(glob.glob(pat))
+
     ok, detail, result = vv.op4_hidden_eval(ralph_root, proof)
     assert ok, detail
     assert "sandboxed" in detail
+    # /out host scratch is removed on exit — no per-submission /tmp leak.
+    assert set(glob.glob(pat)) == before, "sandbox /out scratch leaked"
     ref = compute_val_bpb(model, tokens, cfg.max_seq_len // 2, bytes_per_token=4.0)
     assert result.val_bpb == pytest.approx(ref["val_bpb"], rel=1e-4)
     assert result.tokens_evaluated == ref["tokens_evaluated"]
