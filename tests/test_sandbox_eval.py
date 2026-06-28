@@ -59,7 +59,9 @@ def test_sandbox_eval_reduction_matches_in_process_val_bpb(tmp_path):
     saved = np.load(out_dir / "nlls.npy")
     manifest = json.loads((out_dir / "manifest.json").read_text())
     assert manifest["status"] == "ok"
-    seq_len = cfg.max_seq_len // 2
+    from eval.val_bpb import pinned_eval_seq_len
+    seq_len = pinned_eval_seq_len(cfg.max_seq_len)  # host-pinned, not max_seq_len//2
+    assert manifest["seq_len"] == seq_len
     assert saved.shape[0] == expected_token_count(len(tokens), seq_len)
     assert manifest["tokens_emitted"] == saved.shape[0]
 
@@ -122,9 +124,11 @@ def test_op4_routes_through_sandbox_and_host_reduces(tmp_path, monkeypatch):
     assert "sandboxed" in detail
     # /out host scratch is removed on exit — no per-submission /tmp leak.
     assert set(glob.glob(pat)) == before, "sandbox /out scratch leaked"
-    ref = compute_val_bpb(model, tokens, cfg.max_seq_len // 2, bytes_per_token=4.0)
+    from eval.val_bpb import pinned_eval_seq_len
+    ref = compute_val_bpb(model, tokens, pinned_eval_seq_len(cfg.max_seq_len), bytes_per_token=4.0)
     assert result.val_bpb == pytest.approx(ref["val_bpb"], rel=1e-4)
     assert result.tokens_evaluated == ref["tokens_evaluated"]
+    assert result.val_seq_len == pinned_eval_seq_len(cfg.max_seq_len)
 
 
 def test_op4_sandbox_fails_closed_when_runtime_unavailable(tmp_path, monkeypatch):

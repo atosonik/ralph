@@ -658,7 +658,7 @@ def _sandboxed_hidden_eval(
         hash_target_stream,
         reduce_token_nlls,
     )
-    from eval.val_bpb import DEFAULT_BYTES_PER_TOKEN, load_eval_tokens
+    from eval.val_bpb import DEFAULT_BYTES_PER_TOKEN, load_eval_tokens, pinned_eval_seq_len
     from ralph_bootstrap import RECIPE_DIR
     from validator.sandbox import Mount, SandboxConfig, SandboxUnavailable, is_pinned_image, run_in_sandbox
 
@@ -709,7 +709,22 @@ def _sandboxed_hidden_eval(
             return False, "op4 sandbox produced no nlls/manifest output", None
 
         manifest = json.loads(man_path.read_text())
+        # Host-PIN the eval window: re-derive seq_len from the checkpoint config
+        # ourselves and REJECT if the container echoed anything else. The manifest
+        # value is verified, never trusted — a miner cannot widen (or otherwise
+        # pick) the eval window from inside the container.
+        try:
+            expected_seq_len = pinned_eval_seq_len(
+                _safe_load_checkpoint_config(ckpt_path)["max_seq_len"]
+            )
+        except (KeyError, ValueError, RuntimeError, OSError) as e:
+            return False, f"op4 sandbox could not derive host seq_len: {e}", None
         seq_len = int(manifest["seq_len"])
+        if seq_len != expected_seq_len:
+            return False, (
+                f"op4 sandbox seq_len mismatch: container echoed {seq_len}, host "
+                f"pins {expected_seq_len} (miner cannot choose the eval window)"
+            ), None
         tokens = np.asarray(load_eval_tokens(eval_dir / "active_tokens.bin"))
         eval_set_hash = hash_target_stream(tokens)  # HOST-computed, not miner-supplied
         try:

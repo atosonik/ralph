@@ -127,7 +127,8 @@ def _eval_input_for(scored: dict, seed: int) -> dict:
         # lets an auditor confirm it re-runs over the identical held-out data.
         "sealed_stream_manifest_hash": scored.get("sealed_stream_manifest_hash"),
         "seed": seed,
-        # The context length the hidden-eval used (RalphConfig.max_seq_len//2).
+        # The context length the hidden-eval used: validator-pinned
+        # min(EVAL_SEQ_LEN, max_seq_len), so an auditor re-runs the same window.
         "val_seq_len": scored.get("val_seq_len"),
         "ladder_rungs": list(_STANDARD_LADDER_RUNGS_LABELED),
     }

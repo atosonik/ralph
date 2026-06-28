@@ -76,7 +76,7 @@ def run_sandbox_eval(
     # Trusted helpers FIRST (canonical/installed), before the workdir goes on the
     # path — miner code in workdir must not be able to shadow the reducer.
     from eval.benchmark import compute_benchmark_score
-    from eval.val_bpb import load_eval_tokens, per_position_nlls
+    from eval.val_bpb import load_eval_tokens, per_position_nlls, pinned_eval_seq_len
 
     sys.path.insert(0, str(Path(workdir).resolve()))
     import torch
@@ -99,7 +99,10 @@ def run_sandbox_eval(
     if torch.cuda.is_available():
         model = model.cuda()
 
-    seq_len = cfg.max_seq_len // 2
+    # Validator-pinned window from the TRUSTED (image-baked) eval package — NOT
+    # miner-controlled. The host re-derives the same value and rejects the
+    # manifest if the container echoes anything else.
+    seq_len = pinned_eval_seq_len(cfg.max_seq_len)
     eval_dir = Path(eval_dir)
     tokens = np.asarray(load_eval_tokens(eval_dir / "active_tokens.bin"))
     nlls = per_position_nlls(model, tokens, seq_len, batch_size)

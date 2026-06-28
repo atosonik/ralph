@@ -56,6 +56,7 @@ def main() -> int:
         from model import RalphBase, RalphConfig
 
         from eval import run_hidden_eval
+        from eval.val_bpb import pinned_eval_seq_len
     except Exception as e:
         print(f"ERROR: import failed: {e}", file=sys.stderr)
         return 1
@@ -103,7 +104,11 @@ def main() -> int:
 
     try:
         eval_root = workdir if (workdir / "eval" / "private").is_dir() else ralph_root
-        result = run_hidden_eval(model, eval_root / "eval" / "private", seq_len=cfg.max_seq_len // 2)
+        # Validator-pinned eval window — NOT the miner-controlled cfg.max_seq_len//2.
+        result = run_hidden_eval(
+            model, eval_root / "eval" / "private",
+            seq_len=pinned_eval_seq_len(cfg.max_seq_len),
+        )
     except Exception as e:
         print(f"ERROR: hidden_eval crashed: {e}", file=sys.stderr)
         return 2
