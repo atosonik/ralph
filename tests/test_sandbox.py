@@ -119,7 +119,10 @@ def test_run_in_sandbox_builds_hardened_argv(monkeypatch, tmp_path):
 
     class _Proc:
         returncode = 0
-        stdout = "RALPH_EVAL_RESULT val_bpb=1.234567 benchmark_acc=0.5 tokens_evaluated=100 benchmark_examples=10 eval_set_hash=" + "b" * 64 + "\n"
+        stdout = (
+            "RALPH_EVAL_RESULT val_bpb=1.234567 benchmark_acc=0.5 tokens_evaluated=100 "
+            "benchmark_examples=10 eval_set_hash=" + "b" * 64 + "\n"
+        )
         stderr = ""
 
     def _fake_run(argv, **kw):

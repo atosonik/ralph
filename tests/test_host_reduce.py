@@ -90,7 +90,8 @@ def test_rejects_bad_bytes_per_token():
 def test_hash_binds_host_stream_and_is_deterministic():
     a = np.arange(100, dtype=np.uint16)
     b = np.arange(100, dtype=np.uint16)
-    c = a.copy(); c[50] = 999
+    c = a.copy()
+    c[50] = 999
     assert hash_target_stream(a) == hash_target_stream(b)
     assert hash_target_stream(a) != hash_target_stream(c)
     assert len(hash_target_stream(a)) == 64

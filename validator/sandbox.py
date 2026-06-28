@@ -26,12 +26,11 @@ image are landed alongside it.
 """
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from proof.runner import _TRAINING_ENV_BLOCKLIST, _redacted
