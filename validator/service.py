@@ -708,6 +708,16 @@ def _apply_pool_split(
     return weights
 
 
+def _submission_hotkey(bundle_dir: Path) -> str | None:
+    """Cheap read of the claimed miner hotkey from a pending bundle (pre-op4)."""
+    try:
+        sub = json.loads((bundle_dir / "submission.json").read_text())
+        hk = sub.get("miner_hotkey")
+        return str(hk) if hk else None
+    except Exception:
+        return None
+
+
 def run_epoch(
     chain,
     queue_dir: Path,
@@ -801,8 +811,28 @@ def run_epoch(
     # and LocalChain expose .chain_dir.
     chain_dir = getattr(chain, "chain_dir", None)
 
+    # Dynamic per-hotkey cooldown ("one-in-flight"): at most one bundle per
+    # hotkey is evaluated per epoch; extras are DEFERRED (left queued) and retried
+    # once the in-flight one has been scored. NOT Ninja's one-shot rule — a hotkey
+    # can submit again next epoch. Opt-in via RALPH_ONE_IN_FLIGHT=1 (default off so
+    # pulling this never changes live behavior until enabled). No explicit release:
+    # a scored bundle leaves `pending`, so the next epoch's reconcile() frees the
+    # hotkey; reconcile also clears any claim orphaned by a mid-epoch crash.
+    inflight = None
+    if os.environ.get("RALPH_ONE_IN_FLIGHT", "0") == "1" and chain_dir:
+        from validator.inflight import InFlightGuard
+        inflight = InFlightGuard(Path(chain_dir) / "inflight.json")
+        inflight.reconcile({b.name for b in bundles})
+
     for bundle_dir in bundles:
         bundle_id = bundle_dir.name
+        if inflight is not None:
+            hk = _submission_hotkey(bundle_dir)
+            if hk:
+                ok, why = inflight.claim(hk, bundle_id)
+                if not ok:
+                    log_info(f"deferring {bundle_id} (one-in-flight): {why}")
+                    continue
         log_info(f"scoring {bundle_id}...")
 
         try:
