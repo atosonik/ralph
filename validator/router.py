@@ -43,6 +43,29 @@ def _write_king(ralph_root: Path, king: dict) -> None:
     (_chain_dir(ralph_root) / "king.json").write_text(json.dumps(king, indent=2, sort_keys=True))
 
 
+def _load_high_water(ralph_root: Path) -> dict | None:
+    """The last-crowned king's quality bar, persisted separately from king.json so
+    it survives a cleared/missing throne. None only at genuine genesis."""
+    path = _chain_dir(ralph_root) / "high_water.json"
+    if not path.exists():
+        return None
+    try:
+        d = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return d if (isinstance(d, dict) and "val_bpb" in d) else None
+
+
+def _write_high_water(ralph_root: Path, val_bpb: float, benchmark_accuracy: float) -> None:
+    (_chain_dir(ralph_root) / "high_water.json").write_text(
+        json.dumps(
+            {"val_bpb": float(val_bpb), "benchmark_accuracy": float(benchmark_accuracy)},
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
 def _append_event(ralph_root: Path, event: dict) -> None:
     path = _chain_dir(ralph_root) / "events.jsonl"
     with path.open("a") as f:
@@ -77,23 +100,31 @@ def process_submission(
         return {"status": "rejected", "result": result.to_dict(), "event": event}
 
     king = _load_king(ralph_root)
-    king_val_bpb = king["val_bpb"] if king else None
-    king_benchmark = king["benchmark_accuracy"] if king else None
+    # Bar to beat: the live king if present, else the last-crowned king's
+    # persisted high-water mark. This closes the gain-0 free-crown gap — a
+    # challenger arriving while the throne is transiently empty must still
+    # decisively beat the prior bar instead of auto-crowning.
+    hwm = _load_high_water(ralph_root)
+    bar = king if king else hwm
+    bar_val_bpb = bar["val_bpb"] if bar else None
+    bar_benchmark = bar["benchmark_accuracy"] if bar else None
 
     tier = result.operations.get("op2_attestation", {}).get("tier", "unverified")
     score = score_bundle(
         val_bpb=result.hidden_eval.val_bpb,
         benchmark_accuracy=result.hidden_eval.benchmark_accuracy,
-        king_val_bpb=king_val_bpb,
-        king_benchmark=king_benchmark,
+        king_val_bpb=bar_val_bpb,
+        king_benchmark=bar_benchmark,
         noise_floor_margin=noise_floor_margin,
         matmul_ms=result.calibration["matmul_ms"],
         wall_clock_s=result.training_summary["wall_clock_s"],
         tier=tier,
     )
 
-    accepted = score.decisively_beats_king if king else False
-    is_first = king is None
+    # is_first is true ONLY at genuine genesis (no king has ever been crowned);
+    # a transiently-empty throne with a high-water mark must beat the bar.
+    is_first = king is None and hwm is None
+    accepted = score.decisively_beats_king if bar else False
 
     event = {
         "type": "submission_scored",
@@ -126,6 +157,9 @@ def process_submission(
         if king:
             new_king["previous_king"] = king
         _write_king(ralph_root, new_king)
+        _write_high_water(
+            ralph_root, new_king["val_bpb"], new_king["benchmark_accuracy"]
+        )
         _append_event(ralph_root, {
             "type": "king_changed" if king else "initial_king",
             "timestamp": time.time(),

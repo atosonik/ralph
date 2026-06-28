@@ -382,6 +382,16 @@ def score_and_decide(
     king = chain.get_king()
     king_bpb = king.val_bpb if king else None
     king_bench = king.benchmark_accuracy if king else None
+    # High-water mark: the reigning king's quality bar, persisted so it SURVIVES a
+    # transiently-empty throne (clear_king from the no-merged-PR reinstate path, or
+    # a missing/corrupt king.json). When the live king record is gone, a challenger
+    # must STILL decisively beat this bar — not get a free crown at gain 0. is_first
+    # (the only legitimate no-bar crown) is true ONLY at genuine genesis: no king
+    # now AND no king ever (no high-water mark). This closes the gap where any
+    # submission could grab the crown during an empty-throne window.
+    hwm = chain.get_high_water_mark()
+    bar_bpb = king_bpb if king else (hwm.get("val_bpb") if hwm else None)
+    bar_bench = king_bench if king else (hwm.get("benchmark_accuracy") if hwm else None)
     # v1.2: single attested-execution tier. op2 either passed (tier="verified")
     # or rejected the submission outright. Treat the field defensively for any
     # legacy bundle that slips through.
@@ -390,15 +400,15 @@ def score_and_decide(
     score = score_bundle(
         val_bpb=result.hidden_eval.val_bpb,
         benchmark_accuracy=result.hidden_eval.benchmark_accuracy,
-        king_val_bpb=king_bpb,
-        king_benchmark=king_bench,
+        king_val_bpb=bar_bpb,
+        king_benchmark=bar_bench,
         noise_floor_margin=noise_floor_margin,
         matmul_ms=result.calibration["matmul_ms"],
         wall_clock_s=result.training_summary["wall_clock_s"],
         tier=tier,
     )
 
-    is_first = king is None
+    is_first = king is None and hwm is None
     decisively = score.decisively_beats_king or is_first
 
     classification, weight_credit = _classify_outcome(
@@ -1050,6 +1060,10 @@ def run_epoch(
                 import dataclasses
                 new_king.previous_king = dataclasses.asdict(king_before)
             chain.set_king(new_king)
+            # Persist the reigning king's quality bar so it survives a later
+            # clear_king — a challenger arriving on an empty throne must still
+            # beat it (no gain-0 free crown). Not updated on reinstate-demotion.
+            chain.set_high_water_mark(new_king.val_bpb, new_king.benchmark_accuracy)
             epoch_results["accepted"] += 1
             king_change_hotkey = miner_hotkey
             # Audit dispatcher: this king_change gets a probabilistic

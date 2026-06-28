@@ -11,6 +11,7 @@ Every operation the Ralph protocol needs from "the chain":
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -142,6 +143,42 @@ class ChainInterface(ABC):
         king_path = Path(chain_dir) / "king.json"
         if king_path.exists():
             king_path.unlink()
+
+    def get_high_water_mark(self) -> Optional[dict]:
+        """The reigning king's quality bar {val_bpb, benchmark_accuracy}.
+
+        Persists in chain_dir/high_water.json and is deliberately NOT removed by
+        clear_king, so a transiently-empty throne (king record cleared or
+        missing) STILL carries a quality bar a challenger must decisively beat —
+        closing the gain-0 free-crown gap where any submission could grab the
+        crown while the throne was empty. Returns None ONLY at genuine genesis
+        (no king has ever been crowned), which is the one time is_first is true.
+        """
+        chain_dir = getattr(self, "chain_dir", None)
+        if not chain_dir:
+            return None
+        p = Path(chain_dir) / "high_water.json"
+        if not p.exists():
+            return None
+        try:
+            d = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError, ValueError):
+            return None
+        return d if (isinstance(d, dict) and "val_bpb" in d) else None
+
+    def set_high_water_mark(self, val_bpb: float, benchmark_accuracy: float) -> None:
+        """Record the just-crowned king's quality bar. Called on every crown so
+        the bar survives a later clear_king. No-op without a chain_dir."""
+        chain_dir = getattr(self, "chain_dir", None)
+        if not chain_dir:
+            return
+        Path(chain_dir).mkdir(parents=True, exist_ok=True)
+        (Path(chain_dir) / "high_water.json").write_text(
+            json.dumps(
+                {"val_bpb": float(val_bpb), "benchmark_accuracy": float(benchmark_accuracy)},
+                sort_keys=True,
+            )
+        )
 
     @abstractmethod
     def append_event(self, event: dict) -> None:
