@@ -36,10 +36,24 @@ def test_subprocess_gets_sanitized_env(monkeypatch, tmp_path):
     env = captured["env"]
     assert env is not None, "subprocess spawned with no explicit env (would inherit secrets)"
     for k in ("RALPH_VALIDATOR_PRIVKEY", "BT_WALLET_PASSWORD", "HF_TOKEN",
-              "RALPH_SKIP_HANDSHAKE", "RALPH_ALLOW_SYNTHETIC_EVAL", "RALPH_TEST_MODE"):
+              "RALPH_SKIP_HANDSHAKE", "RALPH_ALLOW_MOCK_ATTESTATION", "RALPH_TEST_MODE"):
         assert k not in env, f"{k} leaked to the miner-code subprocess"
     leaked = {"seal_should_not_leak_123", "wallet_pw_should_not_leak", "hf_should_not_leak_abcdefgh"}
     assert not (leaked & set(env.values())), "a secret value leaked into the subprocess env"
+
+
+def test_synthetic_eval_toggle_is_forwarded_but_not_set_on_mainnet(monkeypatch, tmp_path):
+    # The canonical eval harness in the child needs RALPH_ALLOW_SYNTHETIC_EVAL;
+    # it's the validator's own toggle, so it IS forwarded when set...
+    captured = {}
+    monkeypatch.setattr(_sp, "run", lambda argv, **kw: (captured.update(env=kw.get("env")), _Proc(out=_OK_LINE))[1])
+    monkeypatch.setenv("RALPH_ALLOW_SYNTHETIC_EVAL", "1")
+    _run_eval_subprocess(tmp_path, tmp_path / "ckpt.pt", tmp_path, "canonical-eval")
+    assert captured["env"].get("RALPH_ALLOW_SYNTHETIC_EVAL") == "1"
+    # ...and absent (fail-closed) when the validator hasn't set it (mainnet).
+    monkeypatch.delenv("RALPH_ALLOW_SYNTHETIC_EVAL", raising=False)
+    _run_eval_subprocess(tmp_path, tmp_path / "ckpt.pt", tmp_path, "canonical-eval")
+    assert "RALPH_ALLOW_SYNTHETIC_EVAL" not in captured["env"]
 
 
 def test_nonzero_exit_is_rejected_not_crash(monkeypatch, tmp_path):

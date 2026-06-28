@@ -502,6 +502,7 @@ def _run_eval_subprocess(
     allowlist-only env (never the seal privkey / wallet / tokens) and its stderr
     is redacted — same discipline as the op4 env-sanitize stopgap (PR#70).
     """
+    import os
     import subprocess
 
     from proof.runner import _redacted, _sanitized_env
@@ -509,13 +510,24 @@ def _run_eval_subprocess(
     helper = Path(__file__).resolve().parent / "eval_in_workdir.py"
     if not helper.exists():
         return False, f"{label}: helper script missing at {helper}", None
+    # Allowlist-only env (no seal key / wallet / tokens). One exception: forward
+    # the validator's OWN RALPH_ALLOW_SYNTHETIC_EVAL — run_hidden_eval (canonical
+    # eval harness, runs IN the child) reads it to allow the testnet/CI synthetic
+    # fallback when no held-out shard is deployed. It is never set on mainnet
+    # (=> fail-closed there) and is not miner-settable, so forwarding it past the
+    # secret blocklist matches the in-process op4 semantics without weakening
+    # mainnet. The actual enforcement toggles (SKIP_HANDSHAKE, ALLOW_MOCK_
+    # ATTESTATION, TEST_MODE) stay blocked.
+    child_env = _sanitized_env(extra={"PYTHONPATH": str(workdir)})
+    if os.environ.get("RALPH_ALLOW_SYNTHETIC_EVAL"):
+        child_env["RALPH_ALLOW_SYNTHETIC_EVAL"] = os.environ["RALPH_ALLOW_SYNTHETIC_EVAL"]
     try:
         res = subprocess.run(
             [sys.executable, str(helper), str(workdir), str(ckpt_path), str(ralph_root)],
             capture_output=True,
             text=True,
             timeout=240,
-            env=_sanitized_env(extra={"PYTHONPATH": str(workdir)}),
+            env=child_env,
         )
     except subprocess.TimeoutExpired:
         return False, f"{label} subprocess timed out (>240s)", None
