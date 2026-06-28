@@ -26,7 +26,18 @@ _PROTOCOL_FILES = ("restricted_files.yaml", "README.md")
 # submission rejects at op2 with "container measurement mismatch". Excluding it
 # lets both sides hash the identical shared tree. (eval/downstream/private_hard.py
 # is kept — only the eval/private/ DIR is dropped.)
-_EXCLUDED_REL_PREFIXES: tuple[tuple[str, ...], ...] = (("eval", "private"),)
+# data/data_manifest.json is the locally generated training data manifest,
+# written per host by data.prepare and never committed. Its hash differs on
+# every miner, while the validator computes the measurement on a clean tree that
+# has no manifest, so including it makes the value impossible for a miner to
+# reproduce and every honest verified submission rejects at op2. Excluding it
+# (the same reasoning as eval/private) lets both sides hash the identical shared
+# code tree. The data/ recipe code (prepare.py, dataset.py, tokenizer.py) stays
+# hashed; only the generated manifest is dropped.
+_EXCLUDED_REL_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("eval", "private"),
+    ("data", "data_manifest.json"),
+)
 
 
 def _is_excluded(rel: Path) -> bool:
