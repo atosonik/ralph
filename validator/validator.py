@@ -686,8 +686,8 @@ def _sandboxed_hidden_eval(
             Mount(proof_dir, "/in", ro=True),
             Mount(eval_dir, "/eval-private", ro=True),
         ]
+        # ENTRYPOINT already runs `python -m validator.sandbox_eval`; pass args only.
         container_argv = [
-            "python", "-m", "validator.sandbox_eval",
             "/canon", "/in/patch.diff", "/in/training/checkpoint.pt", "/eval-private", "/out",
         ]
         try:
@@ -945,6 +945,11 @@ def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid, se
 
     grid_dir = Path(tempfile.mkdtemp(prefix="ralph_hosb_grid_"))
     out_dir = Path(tempfile.mkdtemp(prefix="ralph_hosb_out_"))
+    # userns-remap maps the container --user to an unprivileged host uid that
+    # cannot touch root-owned 0700 mkdtemp dirs; open the dir bits so the (ro)
+    # grid is readable and the (rw) out is writable from the remapped namespace.
+    os.chmod(grid_dir, 0o755)
+    os.chmod(out_dir, 0o777)
     try:
         np.save(grid_dir / "idx_grid.npy", idx_grid)
         np.save(grid_dir / "scored_idx.npy", scored_idx)  # positions, NOT the answer
@@ -966,8 +971,9 @@ def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid, se
             Mount(proof_dir, "/in", ro=True),
             Mount(grid_dir, "/grid", ro=True),  # idx_grid + scored_idx — NO targets, NO raw shard
         ]
+        # ENTRYPOINT already runs `python -m validator.sandbox_eval`; pass args only.
         container_argv = [
-            "python", "-m", "validator.sandbox_eval", "--grid",
+            "--grid",
             "/canon", "/in/patch.diff", "/in/training/checkpoint.pt", "/grid", "/out",
         ]
         res = run_in_sandbox(

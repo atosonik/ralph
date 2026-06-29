@@ -62,6 +62,7 @@ COPY eval/ /app/eval/
 COPY calibration/ /app/calibration/
 COPY proof/ /app/proof/
 COPY validator/ /app/validator/
+COPY miner/ /app/miner/
 COPY configs/ /app/configs/
 COPY restricted_files.yaml /app/restricted_files.yaml
 COPY ralph_bootstrap.py /app/ralph_bootstrap.py

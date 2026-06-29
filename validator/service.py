@@ -143,12 +143,29 @@ def _safe_current_block(chain) -> int:
 
 
 def archive_bundle(bundle_dir: Path, queue_dir: Path, dest: str) -> None:
-    """Move a processed bundle to scored/ or rejected/."""
+    """Move a processed bundle to scored/ or rejected/.
+
+    Rejected bundles are terminal — their hash is recorded in hf_state.json so
+    they are never re-downloaded or re-evaluated — so the heavy training/
+    checkpoint (~0.5 GB each) is GC'd on archive to keep queue/rejected/ from
+    filling the disk. The lightweight manifests are kept as an audit trail.
+    Opt out with RALPH_QUEUE_GC_REJECTED=0.
+    """
     target = queue_dir / dest / bundle_dir.name
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         shutil.rmtree(target)
     shutil.move(str(bundle_dir), str(target))
+    if dest == "rejected" and os.environ.get(
+        "RALPH_QUEUE_GC_REJECTED", "1"
+    ).strip().lower() not in {"0", "false", "no", "off"}:
+        ckpt_dir = target / "training"
+        if ckpt_dir.exists():
+            try:
+                shutil.rmtree(ckpt_dir)
+                log_info(f"  queue GC: removed rejected checkpoint {target.name}/training")
+            except OSError as e:
+                log_warn(f"queue GC: could not remove {ckpt_dir}: {e}")
 
 
 def _close_losing_prs(bundle_dir: Path, reason: str) -> None:

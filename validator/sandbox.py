@@ -108,7 +108,7 @@ def build_container_env(env_extra: dict[str, str] | None) -> dict[str, str]:
         "PYTHONUNBUFFERED": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
         "HOME": "/scratch",
-        "TMPDIR": "/scratch/tmp",
+        "TMPDIR": "/scratch",
     }
     for k, v in (env_extra or {}).items():
         if k in _TRAINING_ENV_BLOCKLIST:
