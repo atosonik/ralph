@@ -904,16 +904,18 @@ def _hosb_epoch_seed(chain, eval_shard_fp: str, bundle_fp: str):
     return seed, f"{anchor}:{bh[:16]}"
 
 
-def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid):
+def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid, seed: bytes = b""):
     """Run the (untrusted) model over the HOST grid in the hardened container and
-    return the per-cell NLLs the host computes ITSELF.
+    return the per-cell NLLs + host-reduced benchmark the host computes ITSELF.
 
     LEAK-FREE: the container is given ONLY idx_grid (blanked rows) + scored_idx
-    (the scored COLUMN per row — not the answer) + an optional benchmark file. It
-    NEVER receives the targets, so miner code cannot read the answer key off disk.
-    It emits the top-K logits at each scored cell; the HOST computes cross-entropy
-    against the targets it kept (`ce_from_topk_logits`). Returns (nlls_2d, manifest)
-    so the caller reduces it exactly like the in-process path. Raises on failure.
+    (the scored COLUMN per row — not the answer) + a SHUFFLED benchmark candidate
+    grid (no correct-index marker, no raw answer file). It NEVER receives the
+    targets or the benchmark answer key. It emits the top-K logits at each scored
+    cell + a score per shuffled benchmark candidate; the HOST computes
+    cross-entropy (`ce_from_topk_logits`) and benchmark accuracy
+    (`reduce_benchmark_scores`) against the private answers it kept. Returns
+    (nlls_2d, manifest) with a HOST benchmark_accuracy. Raises on failure.
     """
     import os
     import shutil
@@ -947,9 +949,18 @@ def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid):
         np.save(grid_dir / "idx_grid.npy", idx_grid)
         np.save(grid_dir / "scored_idx.npy", scored_idx)  # positions, NOT the answer
         (grid_dir / "job.json").write_text(json.dumps({"top_k": top_k}))
+        # Host-reduced benchmark: build the SHUFFLED candidate grid host-side and
+        # mount it WITHOUT the correct-index marker / answer key; keep correct_pos
+        # private. The raw active_benchmark.json is never mounted.
+        bench_correct_pos = None
         bpath = ralph_root / "eval" / "private" / "active_benchmark.json"
         if bpath.exists():
-            shutil.copy(bpath, grid_dir / "active_benchmark.json")
+            from eval.val_bpb import build_benchmark_grid
+            examples = json.loads(bpath.read_text())
+            ctx_flat, ctx_off, cands_shuf, bench_correct_pos = build_benchmark_grid(examples, seed)
+            np.save(grid_dir / "bench_context.npy", ctx_flat)
+            np.save(grid_dir / "bench_ctx_offsets.npy", ctx_off)
+            np.save(grid_dir / "bench_cands.npy", cands_shuf)  # shuffled — no correct marker
         mounts = [
             Mount(Path(RECIPE_DIR), "/canon", ro=True),
             Mount(proof_dir, "/in", ro=True),
@@ -987,6 +998,17 @@ def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid):
         # Scatter the host-computed CE back to (M, L) at each row's scored column.
         nlls_2d = np.zeros(idx_grid.shape, dtype=np.float64)
         nlls_2d[rows, scored_idx] = ce
+
+        # HOST-reduce the benchmark (HRB): argmax the container's per-candidate
+        # scores against the PRIVATE correct slot — the container never saw it.
+        if bench_correct_pos is not None and (out_dir / "bench_scores.npy").exists():
+            from eval.host_reduce import reduce_benchmark_scores
+            acc, _stderr = reduce_benchmark_scores(np.load(out_dir / "bench_scores.npy"), bench_correct_pos)
+            manifest["benchmark_accuracy"] = round(float(acc), 3)
+            manifest["benchmark_examples"] = int(bench_correct_pos.shape[0])
+        else:
+            manifest["benchmark_accuracy"] = 0.0
+            manifest["benchmark_examples"] = 0
         return nlls_2d, manifest
     finally:
         shutil.rmtree(grid_dir, ignore_errors=True)
@@ -1030,7 +1052,7 @@ def _hosb_eval(ralph_root: Path, proof_dir: Path, chain, nll_provider=None):
         tokens, tokens, seq_len, seed, n_scored_per_window=tol["n_scored_per_window"]
     )
 
-    provider = nll_provider or (lambda ig, tg: _hosb_sandbox_nlls(ralph_root, proof_dir, ig, tg))
+    provider = nll_provider or (lambda ig, tg: _hosb_sandbox_nlls(ralph_root, proof_dir, ig, tg, seed))
     try:
         nlls, manifest = provider(idx_grid, tgt_grid)
     except Exception as e:  # noqa: BLE001 — SandboxUnavailable/RuntimeError/etc → fail closed
@@ -1146,9 +1168,9 @@ def op4_hidden_eval(
         import os
         if os.environ.get("RALPH_HOSB_ENFORCE_ACK", "0") != "1":
             return False, (
-                "HOSB enforce is not fully cheat-proof yet: val_bpb partition is now host-owned "
-                "(lower-bound-Z), but the benchmark axis is still container-reported and the king "
-                "is not yet HOSB-re-scored; needs stage-4b + on-box calibration. Set "
+                "HOSB enforce: val_bpb (lower-bound-Z) and benchmark (host-reduced) are now both "
+                "host-owned, but the king is not yet HOSB-re-scored and on-box tolerance/K "
+                "calibration has not run; flip only after that GO/NO-GO. Set "
                 "RALPH_HOSB_ENFORCE_ACK=1 to override for testing, or use RALPH_HOSB=shadow"
             ), None
         _seed, tag = _hosb_epoch_seed(chain, shard_fp, _bundle_fp(proof_dir))

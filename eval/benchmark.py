@@ -50,23 +50,28 @@ def compute_benchmark_score(
     return {"benchmark_accuracy": accuracy, "n_examples": total, "n_correct": correct}
 
 
-def make_placeholder_examples(n: int = 50, seed: int = 7777, vocab_size: int = 50257) -> list[dict]:
+def make_placeholder_examples(
+    n: int = 50, seed: int = 7777, vocab_size: int = 50257, n_candidates: int = 5
+) -> list[dict]:
     """Generate stable placeholder examples for the Phase 0 hidden-eval set.
 
-    Each example is a short context drawn from a fixed token sequence; target
-    is the next token; distractors are random other tokens. A model that has
-    learned its training distribution will tend to put higher probability on
-    targets that match adjacent-token co-occurrence statistics — coarse but
-    nonzero signal.
+    CONTENT-WHITENED: the target and the distractors are drawn from ONE
+    exchangeable pool (a single `rng.choice` without replacement) and the target
+    slot is chosen uniformly. So the candidate token-ids share the same marginal
+    and NO monotone function of the token-id (e.g. "pick the smallest id") can
+    distinguish the answer — a host-reduced benchmark on a non-whitened file is
+    still forgeable from the id distribution (the deployed file must be
+    regenerated with this generator).
     """
     rng = np.random.default_rng(seed)
     examples = []
     for _ in range(n):
         ctx_len = int(rng.integers(8, 24))
         context_ids = rng.integers(0, vocab_size, size=ctx_len).tolist()
-        target_id = int(rng.integers(0, vocab_size))
-        distractors = rng.choice(vocab_size, size=4, replace=False).tolist()
-        distractors = [int(t) for t in distractors if int(t) != target_id][:4]
+        cands = rng.choice(vocab_size, size=n_candidates, replace=False)
+        target_slot = int(rng.integers(0, n_candidates))
+        target_id = int(cands[target_slot])
+        distractors = [int(c) for i, c in enumerate(cands) if i != target_slot]
         examples.append({
             "context_ids": context_ids,
             "target_id": target_id,

@@ -370,6 +370,41 @@ def build_blanked_grid(
     return idx_grid, tgt_grid, layout
 
 
+def build_benchmark_grid(examples: list, seed: bytes):
+    """HOST-side: shuffle each multiple-choice example's candidates with a PRIVATE
+    per-example permutation and emit only (context, shuffled candidate token-ids)
+    with NO correct-index marker. Returns:
+      contexts_flat (int64), ctx_offsets (int64, len N+1)  — ragged contexts (CSR)
+      cands_shuf (int64, (N, C))                            — shuffled candidates
+      correct_pos (int64, (N,))  — PRIVATE: where the target landed (host-only)
+    The container scores each shuffled candidate; the host un-shuffles via
+    correct_pos. A container lacking the permutation forges at most chance, and
+    (with a content-whitened file) the candidate token-ids reveal nothing.
+    """
+    rng = _seed_rng(seed)
+    contexts_flat: list[int] = []
+    ctx_offsets = [0]
+    cands_rows: list[list[int]] = []
+    correct_pos: list[int] = []
+    for ex in examples:
+        cands = [int(ex["target_id"])] + [int(d) for d in ex["distractors"]]  # index 0 = target
+        perm = rng.permutation(len(cands))
+        cands_rows.append([cands[p] for p in perm])
+        correct_pos.append(int(np.where(perm == 0)[0][0]))  # where the target (orig 0) landed
+        ctx = [int(t) for t in ex["context_ids"]]
+        contexts_flat.extend(ctx)
+        ctx_offsets.append(len(contexts_flat))
+    width = len(cands_rows[0]) if cands_rows else 0
+    if any(len(r) != width for r in cands_rows):
+        raise ValueError("all benchmark examples must have the same candidate count")
+    return (
+        np.asarray(contexts_flat, dtype=np.int64),
+        np.asarray(ctx_offsets, dtype=np.int64),
+        np.asarray(cands_rows, dtype=np.int64) if cands_rows else np.zeros((0, 0), np.int64),
+        np.asarray(correct_pos, dtype=np.int64),
+    )
+
+
 def per_position_nlls_blanked(
     model: torch.nn.Module,
     idx_grid: np.ndarray,

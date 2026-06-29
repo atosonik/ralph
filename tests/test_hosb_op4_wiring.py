@@ -68,7 +68,7 @@ def _inprocess_provider(ralph_root, proof, *, bench=0.5):
     """A stand-in for _hosb_sandbox_nlls: runs the model in-process over the grid."""
     model = _load_canonical(proof / "training" / "checkpoint.pt")
 
-    def provider(_rr, _pd, idx_grid, tgt_grid):
+    def provider(_rr, _pd, idx_grid, tgt_grid, _seed=b""):
         nlls = per_position_nlls_blanked(model, idx_grid, tgt_grid)
         return nlls, {"benchmark_accuracy": bench, "benchmark_examples": 3}
 
@@ -191,6 +191,51 @@ def test_ce_from_topk_rejects_impossible_emissions():
         ce_from_topk_logits(np.array([[np.inf, 0.0]]), np.array([[0, 1]]), tgt, vocab_size=5)
 
 
+def test_hosb_benchmark_is_host_reduced_no_answer_key_mounted(tmp_path, monkeypatch):
+    """The benchmark answer key is never mounted; the container gets only shuffled
+    candidates and the HOST computes accuracy from the private correct slot."""
+    import validator.sandbox as sbx
+    from validator.sandbox import SandboxResult
+    from validator.sandbox_eval import run_sandbox_grid_eval
+
+    ralph_root, proof, cfg, _model = _setup_submission(tmp_path)
+    monkeypatch.setenv("RALPH_SANDBOX_IMAGE", "ralph-eval-sandbox@sha256:" + "a" * 64)
+    # A small whitened benchmark file; contexts kept short (< the tiny model's
+    # max_seq_len=16; real models are 512+). Candidates from one exchangeable pool.
+    rng = np.random.default_rng(1)
+    examples = []
+    for _ in range(8):
+        cands = rng.choice(cfg.vocab_size, size=5, replace=False)
+        examples.append({
+            "context_ids": [int(t) for t in rng.integers(0, cfg.vocab_size, size=6)],
+            "target_id": int(cands[0]),
+            "distractors": [int(c) for c in cands[1:]],
+        })
+    (ralph_root / "eval" / "private" / "active_benchmark.json").write_text(json.dumps(examples))
+    tokens = np.fromfile(ralph_root / "eval" / "private" / "active_tokens.bin", dtype=np.uint16)
+    L = pinned_eval_seq_len(cfg.max_seq_len)
+    idx, tgt, _layout = build_blanked_grid(tokens, tokens, L, b"bs", n_scored_per_window=4)
+
+    captured = {}
+
+    def fake(cfg_, *, container_argv, mounts, out_dir, timeout_s, **kw):
+        gdir = next(Path(m.host) for m in mounts if m.container == "/grid")
+        captured["files"] = sorted(p.name for p in gdir.iterdir())
+        run_sandbox_grid_eval(RECIPE_DIR, proof / "training" / "checkpoint.pt", gdir, out_dir)
+        return SandboxResult(returncode=0, stdout="ok", stderr="", timed_out=False)
+
+    monkeypatch.setattr(sbx, "run_in_sandbox", fake)
+    _nlls, manifest = vv._hosb_sandbox_nlls(ralph_root, proof, idx, tgt, b"bench-seed")
+
+    # shuffled candidates are mounted; the answer key / correct-index never is.
+    assert "bench_cands.npy" in captured["files"]
+    assert "active_benchmark.json" not in captured["files"]
+    assert not any("correct" in f for f in captured["files"])
+    # the host computed a real accuracy (not a container-reported number).
+    assert manifest["benchmark_examples"] == 8
+    assert 0.0 <= manifest["benchmark_accuracy"] <= 1.0
+
+
 def test_hosb_sandbox_pins_vocab_from_checkpoint_not_manifest(tmp_path, monkeypatch):
     """The container manifest's vocab is never used in scoring — V comes from the
     HOST checkpoint config (index-range validation only; CE uses the host-built
@@ -273,7 +318,7 @@ def test_op4_enforce_requires_ack_else_fails_closed(tmp_path, monkeypatch):
     monkeypatch.delenv("RALPH_HOSB_ENFORCE_ACK", raising=False)
     monkeypatch.setattr(vv, "_hosb_sandbox_nlls", lambda *a, **k: pytest.fail("HOSB ran without ack"))
     ok, detail, result = vv.op4_hidden_eval(ralph_root, proof, chain=LocalChain(tmp_path / "chain"))
-    assert not ok and result is None and "cheat-proof" in detail
+    assert not ok and result is None and "calibration" in detail
 
 
 def test_op4_enforce_crowns_hosb(tmp_path, monkeypatch):
@@ -310,7 +355,7 @@ def test_op4_enforce_rejects_witness_failure(tmp_path, monkeypatch):
 
     # A degenerate cheat producer: emit ~0 NLL everywhere → the wrong-target cells
     # are all sub-floor → the host's witness rejects (fail-closed).
-    def zeros_provider(_rr, _pd, idx_grid, _tgt_grid):
+    def zeros_provider(_rr, _pd, idx_grid, _tgt_grid, _seed=b""):
         return np.zeros_like(idx_grid, dtype=np.float32), {"benchmark_accuracy": 0.0, "benchmark_examples": 0}
 
     monkeypatch.setattr(vv, "_hosb_sandbox_nlls", zeros_provider)

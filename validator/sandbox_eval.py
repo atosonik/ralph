@@ -186,9 +186,6 @@ def run_sandbox_grid_eval(
     import numpy as np
     import torch
 
-    # Trusted helpers FIRST, before the workdir goes on sys.path.
-    from eval.benchmark import compute_benchmark_score
-
     grid_dir = Path(grid_dir)
     out_dir = Path(out_dir)
     job = {}
@@ -200,6 +197,7 @@ def run_sandbox_grid_eval(
     model, cfg = _load_model_from_workdir(workdir, ckpt_path)
     device = next(model.parameters()).device
     model.eval()
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     idx_grid = np.load(grid_dir / "idx_grid.npy")
     scored_idx = np.load(grid_dir / "scored_idx.npy")  # (M,), the scored column per row
@@ -219,16 +217,27 @@ def run_sandbox_grid_eval(
             topk_vals[s : s + inp.size(0)] = vals.float().cpu().numpy()
             topk_idx[s : s + inp.size(0)] = idx.long().cpu().numpy()
 
-    benchmark_accuracy = 0.0
-    benchmark_examples = 0
-    bpath = grid_dir / "active_benchmark.json"
-    if bpath.exists():
-        examples = json.loads(bpath.read_text())
-        bench = compute_benchmark_score(model, examples)
-        benchmark_accuracy = float(bench["benchmark_accuracy"])
-        benchmark_examples = int(bench["n_examples"])
+    # Host-reduced benchmark (HRB): the host placed a SHUFFLED candidate grid (no
+    # correct-index marker, no raw answer file). We emit the model's score per
+    # shuffled candidate; the HOST argmaxes against its private correct slot. We do
+    # NOT compute accuracy in-container (it would be forgeable + needs the answer).
+    bench_rows = 0
+    cpath = grid_dir / "bench_cands.npy"
+    if cpath.exists():
+        cands_shuf = np.load(cpath)                 # (N, C) shuffled candidate ids
+        ctx_flat = np.load(grid_dir / "bench_context.npy")
+        ctx_off = np.load(grid_dir / "bench_ctx_offsets.npy")
+        bench_rows = int(cands_shuf.shape[0])
+        bench_scores = np.zeros(cands_shuf.shape, dtype=np.float32)
+        with torch.no_grad():
+            for i in range(bench_rows):
+                ctx = ctx_flat[int(ctx_off[i]) : int(ctx_off[i + 1])].astype(np.int64)
+                logits, _ = model(torch.from_numpy(ctx)[None].to(device))
+                last = logits[0, -1]
+                cols = torch.from_numpy(cands_shuf[i].astype(np.int64)).to(device)
+                bench_scores[i] = last[cols].float().cpu().numpy()
+        np.save(out_dir / "bench_scores.npy", bench_scores)
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     np.save(out_dir / "topk_logits.npy", topk_vals)
     np.save(out_dir / "topk_indices.npy", topk_idx)
     # NO logsumexp emitted: the HOST computes Z_hat = logsumexp(emitted top-K)
@@ -239,8 +248,7 @@ def run_sandbox_grid_eval(
         "mode": "hosb_grid_topk",
         "rows": int(m),
         "top_k": int(k),
-        "benchmark_accuracy": benchmark_accuracy,
-        "benchmark_examples": benchmark_examples,
+        "bench_rows": bench_rows,
         "model_config": {
             "vocab_size": cfg.vocab_size,
             "dim": cfg.dim,

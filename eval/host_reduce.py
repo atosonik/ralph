@@ -93,6 +93,45 @@ def ce_from_topk_logits(
     return np.maximum(np.where(hit, ce_hit, ce_miss), 0.0)
 
 
+def reduce_benchmark_scores(
+    bench_scores: np.ndarray,
+    correct_pos: np.ndarray,
+    n_witness: int = 0,
+) -> tuple[float, float]:
+    """HOST verdict for the multiple-choice benchmark: the container emits a score
+    per SHUFFLED candidate (it never sees which slot is correct); the host argmaxes
+    and compares to the PRIVATE `correct_pos`.
+
+    `bench_scores` is (N, C). For each example the predicted slot is argmax; ties
+    get FRACTIONAL credit (1/#tied if `correct_pos` is in the tie set) so an
+    all-equal / blind producer scores exactly E[acc] = mean(1/C), not 1.0. Because
+    argmax is permutation-equivariant, an honest deterministic model gets the SAME
+    accuracy as the legacy un-shuffled scorer (king comparability). Returns
+    (accuracy, stderr). `n_witness` trailing rows (if any) are excluded.
+    """
+    bench_scores = np.asarray(bench_scores, dtype=np.float64)
+    correct_pos = np.asarray(correct_pos)
+    if bench_scores.ndim != 2:
+        raise ValueError(f"bench_scores must be 2-D (N,C); got {bench_scores.shape}")
+    n, c = bench_scores.shape
+    if correct_pos.shape != (n,):
+        raise ValueError(f"correct_pos must be ({n},); got {correct_pos.shape}")
+    if not np.all(np.isfinite(bench_scores)):
+        raise ValueError("non-finite benchmark scores")
+    keep = n - max(0, int(n_witness))
+    if keep <= 0:
+        return 0.0, 0.0
+    credit = 0.0
+    for i in range(keep):
+        row = bench_scores[i]
+        tied = np.flatnonzero(row >= row.max() - 1e-9)
+        if correct_pos[i] in tied:
+            credit += 1.0 / len(tied)
+    acc = credit / keep
+    stderr = math.sqrt(max(acc * (1.0 - acc), 0.0) / keep)
+    return acc, stderr
+
+
 @dataclass(frozen=True)
 class HostReduced:
     val_bpb: float
