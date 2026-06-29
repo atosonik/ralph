@@ -117,6 +117,35 @@ def test_blanked_grid_answer_is_physically_absent():
         assert tgt[c.row, c.pos] != -100
 
 
+def test_grid_one_scored_position_per_window_no_cross_row_leak():
+    """THE cross-row-leak fix: each window scores exactly ONE position, so no
+    sibling row exposes another's blanked answer window[e+1]. (A multi-position
+    grid let a container recover ~93% of answers off siblings scored at e'>=e+1.)"""
+    eval_tokens, _ = _streams()
+    # disjoint filler id range so "answer absent" is checkable exactly
+    filler = np.random.default_rng(9).integers(1000, 1000 + VOCAB, size=400, dtype=np.uint16)
+    L = 16
+    idx, _tgt, layout = build_blanked_grid(eval_tokens, filler, L, SEED)
+
+    from collections import defaultdict
+    pos_by_window = defaultdict(set)
+    cells_by_window = defaultdict(list)
+    for c in layout:
+        pos_by_window[c.window].add(c.pos)
+        cells_by_window[c.window].append(c)
+    assert pos_by_window  # non-empty grid
+    for w, ps in pos_by_window.items():
+        assert len(ps) == 1, f"window {w} scores multiple positions {ps} (cross-row leak)"
+    # the scored answer is filler (absent) at its column in EVERY row of the window
+    for w, cells in cells_by_window.items():
+        e = cells[0].pos
+        if e + 1 >= L:
+            continue
+        answer = int(eval_tokens[w * L : w * L + L + 1][e + 1])
+        for c in cells:
+            assert int(idx[c.row, e + 1]) != answer
+
+
 def test_blanked_grid_covers_the_tail_and_emits_witnesses():
     eval_tokens, filler = _streams()
     L = 16

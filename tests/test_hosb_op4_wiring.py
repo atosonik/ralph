@@ -189,6 +189,8 @@ def test_ce_from_topk_rejects_impossible_emissions():
         ce_from_topk_logits(np.array([[1.0, 0.0]]), np.array([[2, 2]]), tgt, vocab_size=5)
     with pytest.raises(ValueError, match="non-finite"):
         ce_from_topk_logits(np.array([[np.inf, 0.0]]), np.array([[0, 1]]), tgt, vocab_size=5)
+    with pytest.raises(ValueError, match="magnitude"):  # huge logits → float cancellation forgery
+        ce_from_topk_logits(np.array([[1e18, 1e18 - 5.0]]), np.array([[0, 1]]), tgt, vocab_size=5)
 
 
 def test_hosb_benchmark_is_host_reduced_no_answer_key_mounted(tmp_path, monkeypatch):

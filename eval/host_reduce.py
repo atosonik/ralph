@@ -29,6 +29,9 @@ from dataclasses import dataclass
 import numpy as np
 
 LN2 = math.log(2)
+# Honest pre-softmax logits sit in ~[-50, 50]; anything beyond this is a forged /
+# degenerate emission whose only purpose is float cancellation. Reject it.
+_MAX_ABS_LOGIT = 1e4
 
 
 def ce_from_topk_logits(
@@ -82,14 +85,24 @@ def ce_from_topk_logits(
     sorted_i = np.sort(topk_indices, axis=1)
     if k > 1 and np.any(sorted_i[:, 1:] == sorted_i[:, :-1]):
         raise ValueError("duplicate topk_indices within a row")
+    # Magnitude cap: an honest softmax never needs |logit| > ~50; huge-but-finite
+    # logits (e.g. 1e18) make z_hat - logit[target] catastrophically cancel to 0
+    # (differences fall below the float ULP), forging CE=0. Reject them outright.
+    if np.any(np.abs(topk_logits) > _MAX_ABS_LOGIT):
+        raise ValueError(f"topk_logits magnitude exceeds {_MAX_ABS_LOGIT} — forged/degenerate emission")
 
+    # Cross-entropy from MAX-SHIFTED logits so all terms are O(log K) and there is
+    # no catastrophic cancellation. z_hat = logsumexp(top-K) is the host's lower
+    # bound on the full-vocab Z; CE = z_hat - logit[target] = lse_shifted -
+    # (logit[target] - mx).
     mx = topk_logits.max(axis=1)
-    z_hat = mx + np.log(np.exp(topk_logits - mx[:, None]).sum(axis=1))  # host lower-bound on full Z
+    shifted = topk_logits - mx[:, None]
+    lse_shifted = np.log(np.exp(shifted).sum(axis=1))   # = z_hat - mx, in [0, log K]
     match = topk_indices == targets[:, None]            # (M, K) — one True at most per row
     hit = match.any(axis=1)
-    logit_at_target = np.where(match, topk_logits, -np.inf).max(axis=1)
-    ce_hit = z_hat - logit_at_target                    # valid where hit
-    ce_miss = z_hat - topk_logits.min(axis=1)           # target below the K-th: boundary CE
+    tgt_shifted = np.where(match, shifted, -np.inf).max(axis=1)  # logit[target]-mx (<=0), -inf if absent
+    ce_hit = lse_shifted - tgt_shifted                  # valid where hit
+    ce_miss = lse_shifted - shifted.min(axis=1)         # target below the K-th: boundary CE
     return np.maximum(np.where(hit, ce_hit, ce_miss), 0.0)
 
 

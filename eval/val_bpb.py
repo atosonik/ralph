@@ -263,20 +263,23 @@ def build_blanked_grid(
 ) -> tuple[np.ndarray, np.ndarray, list[BlankedCell]]:
     """HOST-side: build the blanked-input grid + targets + private layout.
 
-    Packs the same non-overlapping (seq_len+1) windows as compute_val_bpb. For
-    each window it draws `n_scored_per_window` host-secret scored indices from
-    [0, L-1] (a `tail_fraction` of them forced into [L//2:] so the long-context
-    tail is always covered). For each scored index `e` it emits ONE row:
+    Packs the same non-overlapping (seq_len+1) windows as compute_val_bpb and
+    scores EXACTLY ONE host-secret position `e` per window (a `tail_fraction` of
+    windows score a tail position [L//2:] for long-context coverage). For that one
+    position it emits:
       idx_grid[row] = real input[0..e] then FILLER on [e+1..L-1]  (answer absent)
       tgt_grid[row] = -100 everywhere except column e = the REAL next token
-    A `witness_fraction` of real cells get a SECOND row with a DIFFERENT filler
-    set B (two-filler invariance witness); a `wrong_target_fraction` of cells get
-    a deliberately-WRONG target (target-tensor-reading witness).
+    plus optional witness rows for the SAME position e (a `witness_fraction` two-
+    filler copy; a `wrong_target_fraction` wrong-target copy). ALL rows of a window
+    blank the identical suffix [e+1:], so no sibling row exposes another's answer,
+    and different windows are disjoint token slices — closing the cross-row answer
+    leak (a multi-position-per-window grid let the container read window[e+1] off a
+    sibling scored at e'>=e+1). `n_scored_per_window` is retained for API
+    compatibility but IGNORED (the per-window count is now fixed at one).
 
     Returns (idx_grid (M,L) int64, tgt_grid (M,L) int64, layout). The `seed`
-    (block-hash-derived in production) makes the whole layout unpredictable at
-    submission and reproducible for audit; it is NEVER written into a
-    container-visible artifact (idx_grid/tgt_grid carry no positional marking).
+    (block-hash-derived in production) makes the layout unpredictable at submission
+    and reproducible for audit; it is NEVER in a container-visible artifact.
     """
     eval_tokens = np.asarray(eval_tokens)
     filler_tokens = np.asarray(filler_tokens)
@@ -311,59 +314,62 @@ def build_blanked_grid(
         real_input = window[:L].astype(np.int64)        # positions 0..L-1
         real_targets = window[1 : L + 1].astype(np.int64)  # target[t] = window[t+1]
 
-        # Stratified sampling: the forced-tail draws come from the TAIL stratum
-        # [L//2, L) and the rest from the HEAD stratum [0, L//2) ONLY — never the
-        # tail again. Keeping the strata disjoint lets reduce_blanked_nlls
-        # stratum-weight the mean so oversampling the tail does NOT bias val_bpb
-        # (the bug: drawing rest from setdiff(arange(L), tail) re-sampled the tail
-        # on top of the forced quota -> tail share > 0.5 -> ~1-2% low bias).
-        n_sc = min(n_scored_per_window, L)
-        n_tail = min(int(round(tail_fraction * n_sc)), L - tail_lo)
-        tail_pos = (
-            rng.choice(np.arange(tail_lo, L), size=n_tail, replace=False)
-            if n_tail > 0 else np.empty(0, dtype=np.int64)
-        )
-        head_pool = np.arange(0, tail_lo)
-        n_rest = min(n_sc - len(tail_pos), len(head_pool))
-        rest_pos = rng.choice(head_pool, size=n_rest, replace=False) if n_rest > 0 else np.empty(0, dtype=np.int64)
-        scored = np.concatenate([tail_pos, rest_pos]).astype(int)
+        # ONE scored position per window. tail_fraction of windows score a tail
+        # position [L//2:] (long-context coverage); the rest a head position.
+        # reduce_blanked_nlls stratum-weights head vs tail by true size.
+        if rng.random() < tail_fraction and tail_lo < L:
+            e = int(rng.integers(tail_lo, L))
+        else:
+            e = int(rng.integers(0, max(1, tail_lo)))
 
-        for e in scored:
-            e = int(e)
-            idx_row = real_input.copy()
-            idx_row[e + 1 :] = _draw_filler(rng, filler_tokens, L - 1 - e)
-            tgt_row = np.full(L, -100, dtype=np.int64)
-            if rng.random() < wrong_target_fraction:
-                # A host-known token that differs from the real next token.
+        idx_row = real_input.copy()
+        idx_row[e + 1 :] = _draw_filler(rng, filler_tokens, L - 1 - e)
+        tgt_row = np.full(L, -100, dtype=np.int64)
+        if rng.random() < wrong_target_fraction:
+            # A host-known token that differs from the real next token.
+            wrong = int(rng.choice(filler_tokens))
+            guard = 0
+            while wrong == int(real_targets[e]) and guard < 8:
                 wrong = int(rng.choice(filler_tokens))
-                guard = 0
-                while wrong == int(real_targets[e]) and guard < 8:
-                    wrong = int(rng.choice(filler_tokens))
-                    guard += 1
-                if wrong == int(real_targets[e]):  # degenerate filler — skip the witness
-                    tgt_row[e] = int(real_targets[e])
-                    kind = "real"
-                else:
-                    tgt_row[e] = wrong
-                    kind = "wrong"
-            else:
+                guard += 1
+            if wrong == int(real_targets[e]):  # degenerate filler — skip the witness
                 tgt_row[e] = int(real_targets[e])
                 kind = "real"
-            rows_idx.append(idx_row)
-            rows_tgt.append(tgt_row)
-            layout.append(BlankedCell(row=row, window=w, pos=e, target_kind=kind, filler_set="A"))
+            else:
+                tgt_row[e] = wrong
+                kind = "wrong"
+        else:
+            tgt_row[e] = int(real_targets[e])
+            kind = "real"
+        rows_idx.append(idx_row)
+        rows_tgt.append(tgt_row)
+        layout.append(BlankedCell(row=row, window=w, pos=e, target_kind=kind, filler_set="A"))
+        row += 1
+
+        # Two-filler witness: a second copy of a REAL cell with different filler —
+        # SAME position e, SAME blanked suffix, so it exposes nothing.
+        if kind == "real" and rng.random() < witness_fraction:
+            idx_rowB = real_input.copy()
+            idx_rowB[e + 1 :] = _draw_filler(rng, filler_tokens, L - 1 - e)
+            tgt_rowB = np.full(L, -100, dtype=np.int64)
+            tgt_rowB[e] = int(real_targets[e])
+            rows_idx.append(idx_rowB)
+            rows_tgt.append(tgt_rowB)
+            layout.append(BlankedCell(row=row, window=w, pos=e, target_kind="real", filler_set="B"))
             row += 1
 
-            # Two-filler witness: a second copy of a REAL cell with different filler.
-            if kind == "real" and rng.random() < witness_fraction:
-                idx_rowB = real_input.copy()
-                idx_rowB[e + 1 :] = _draw_filler(rng, filler_tokens, L - 1 - e)
-                tgt_rowB = np.full(L, -100, dtype=np.int64)
-                tgt_rowB[e] = int(real_targets[e])
-                rows_idx.append(idx_rowB)
-                rows_tgt.append(tgt_rowB)
-                layout.append(BlankedCell(row=row, window=w, pos=e, target_kind="real", filler_set="B"))
-                row += 1
+    # Defensive invariant (the cross-row-leak guard): every window scores exactly
+    # ONE position, so no sibling row in a window can expose another's blanked
+    # answer. Fail loud if a future change reintroduces multi-position windows.
+    by_window: dict[int, set] = {}
+    for c in layout:
+        by_window.setdefault(c.window, set()).add(c.pos)
+    bad = [w for w, ps in by_window.items() if len(ps) != 1]
+    if bad:
+        raise AssertionError(
+            f"build_blanked_grid: window(s) {bad[:3]} score multiple positions — "
+            "sibling rows would expose each other's answers (cross-row leak)"
+        )
 
     idx_grid = np.stack(rows_idx) if rows_idx else np.zeros((0, L), dtype=np.int64)
     tgt_grid = np.stack(rows_tgt) if rows_tgt else np.zeros((0, L), dtype=np.int64)

@@ -981,11 +981,11 @@ def _hosb_sandbox_nlls(ralph_root: Path, proof_dir: Path, idx_grid, tgt_grid, se
         if not (mpath.exists() and all(p.exists() for p in needed)):
             raise RuntimeError("HOSB grid container produced no topk_logits/topk_indices/manifest")
         manifest = json.loads(mpath.read_text())
-        # V is HOST-pinned from the checkpoint config (== the model's real lm_head
-        # width; vocab-enforced to RALPH_VOCAB_SIZE for real submissions), used ONLY
-        # to bound the emitted indices — never the container manifest. The partition
-        # function Z_hat is the HOST's own logsumexp over the emitted top-K (a lower
-        # bound on the true Z), so no container value can deflate cross-entropy.
+        # V from the HOST checkpoint config (bounded to MAX_VOCAB_SIZE; the
+        # RALPH_VOCAB_SIZE==50257 lock is enforced at op1/ladder, not here), used
+        # ONLY to bound the emitted indices — never the container manifest. CE no
+        # longer depends on V: Z_hat is the HOST's own logsumexp over the emitted
+        # top-K (a lower bound on the true Z), so no container value can deflate it.
         host_vocab = int(_safe_load_checkpoint_config(proof_dir / "training" / "checkpoint.pt")["vocab_size"])
         k_expected = min(top_k, host_vocab)
         topk_logits, topk_idx = (np.load(p) for p in needed)
@@ -1045,16 +1045,26 @@ def _hosb_eval(ralph_root: Path, proof_dir: Path, chain, nll_provider=None):
 
     tokens = np.asarray(load_eval_tokens(tok_path))
     tol = _hosb_tolerances()
-    # Filler = real-text slices of the SAME held-out corpus (build_blanked_grid
-    # draws a random offset per row). Same distribution, and the answer is absent
-    # regardless; shard secrecy is defended by rotation, not by the filler source.
-    idx_grid, tgt_grid, layout = build_blanked_grid(
-        tokens, tokens, seq_len, seed, n_scored_per_window=tol["n_scored_per_window"]
-    )
-
     provider = nll_provider or (lambda ig, tg: _hosb_sandbox_nlls(ralph_root, proof_dir, ig, tg, seed))
     try:
+        # Filler = a DISJOINT pseudo-random corpus (seeded for audit), NOT the
+        # secret held-out shard. A causal model ignores input[>e] entirely, so the
+        # filler value never affects a scored cell; drawing it from the shard would
+        # mount verbatim secret slices (a second answer-recovery path). Build is
+        # inside the try so a malformed/short shard fails CLOSED, not crash.
+        filler_seed = hashlib.blake2b(seed + b"hosb-filler", digest_size=8).digest()
+        filler_rng = np.random.default_rng(int.from_bytes(filler_seed, "little"))
+        filler = filler_rng.integers(0, int(tokens.max()) + 1, size=max(len(tokens), 2 * seq_len + 2))
+        idx_grid, tgt_grid, layout = build_blanked_grid(tokens, filler, seq_len, seed)
+        # Wrong-target witness must not be silently empty (it gates the look-ahead
+        # backstop); require a real quota on a non-trivial grid.
+        n_real = sum(1 for c in layout if c.target_kind == "real" and c.filler_set == "A")
+        n_wrong = sum(1 for c in layout if c.target_kind == "wrong")
+        if n_real >= 100 and n_wrong < max(8, int(0.03 * n_real)):
+            return False, f"HOSB: too few wrong-target witness cells ({n_wrong}) — fail-closed", None
         nlls, manifest = provider(idx_grid, tgt_grid)
+    except (ValueError, AssertionError) as e:  # grid build / fraction / leak-invariant
+        return False, f"HOSB: grid build failed (fail-closed): {e}", None
     except Exception as e:  # noqa: BLE001 — SandboxUnavailable/RuntimeError/etc → fail closed
         return False, f"HOSB: grid eval failed (fail-closed): {e}", None
 
