@@ -136,6 +136,9 @@ def test_grid_one_scored_position_per_window_no_cross_row_leak():
     assert pos_by_window  # non-empty grid
     for w, ps in pos_by_window.items():
         assert len(ps) == 1, f"window {w} scores multiple positions {ps} (cross-row leak)"
+    # No boundary cell (e == L-1): its answer window[L] is the NEXT window's
+    # un-blanked column 0 — a cross-window leak. Cap is e <= L-2.
+    assert all(c.pos <= L - 2 for c in layout), "scored e=L-1 reopens the cross-window boundary leak"
     # the scored answer is filler (absent) at its column in EVERY row of the window
     for w, cells in cells_by_window.items():
         e = cells[0].pos
@@ -311,10 +314,10 @@ def test_wrong_target_witness_tolerates_occasional_honest_collision():
     This is the false-positive the absolute per-cell floor produced."""
     L = 8
     layout = [BlankedCell(row=0, window=0, pos=2, target_kind="real", filler_set="A")]
-    nlls = _grid(9, L)
+    nlls = _grid(22, L)
     nlls[0, 2] = 3.0
-    lows = {1}  # exactly one collision out of eight wrong cells (12.5% < 50%)
-    for r in range(1, 9):
+    lows = {1}  # one collision out of twenty wrong cells (5% < the 10% threshold)
+    for r in range(1, 21):
         layout.append(BlankedCell(row=r, window=0, pos=2, target_kind="wrong", filler_set="A"))
         nlls[r, 2] = 0.1 if r in lows else 6.0
     out = reduce_blanked_nlls(nlls, layout, seq_len=L, bytes_per_token=4.0, eval_set_hash="x")

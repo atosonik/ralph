@@ -314,13 +314,16 @@ def build_blanked_grid(
         real_input = window[:L].astype(np.int64)        # positions 0..L-1
         real_targets = window[1 : L + 1].astype(np.int64)  # target[t] = window[t+1]
 
-        # ONE scored position per window. tail_fraction of windows score a tail
-        # position [L//2:] (long-context coverage); the rest a head position.
-        # reduce_blanked_nlls stratum-weights head vs tail by true size.
-        if rng.random() < tail_fraction and tail_lo < L:
-            e = int(rng.integers(tail_lo, L))
+        # ONE scored position per window, NEVER the last (e <= L-2). Scoring e=L-1
+        # would make the answer window[L] == the NEXT window's input column 0 (real,
+        # un-blanked) — a cross-window leak. Capping at L-2 keeps every answer
+        # window[e+1] inside THIS window's blanked filler region.
+        # tail_fraction of windows score a tail position [L//2:]; rest a head one.
+        e_hi = L - 1  # exclusive: e in [.., L-2]
+        if rng.random() < tail_fraction and tail_lo < e_hi:
+            e = int(rng.integers(tail_lo, e_hi))
         else:
-            e = int(rng.integers(0, max(1, tail_lo)))
+            e = int(rng.integers(0, max(1, min(tail_lo, e_hi))))
 
         idx_row = real_input.copy()
         idx_row[e + 1 :] = _draw_filler(rng, filler_tokens, L - 1 - e)

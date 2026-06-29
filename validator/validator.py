@@ -849,7 +849,7 @@ def _hosb_tolerances() -> dict:
     return {
         "tol_witness": _f("RALPH_HOSB_TOL_WITNESS", 0.05),
         "wrong_target_floor": _f("RALPH_HOSB_WRONG_FLOOR", 1.0),
-        "wrong_target_max_low_frac": _f("RALPH_HOSB_WRONG_MAX_LOW", 0.5),
+        "wrong_target_max_low_frac": _f("RALPH_HOSB_WRONG_MAX_LOW", 0.1),
         "n_scored_per_window": int(_f("RALPH_HOSB_N_SCORED", 16)),
     }
 

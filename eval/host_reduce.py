@@ -29,9 +29,10 @@ from dataclasses import dataclass
 import numpy as np
 
 LN2 = math.log(2)
-# Honest pre-softmax logits sit in ~[-50, 50]; anything beyond this is a forged /
-# degenerate emission whose only purpose is float cancellation. Reject it.
-_MAX_ABS_LOGIT = 1e4
+# Honest pre-softmax logits sit in ~[-50, 50] (logit_softcap is ~30); anything
+# beyond ~100 is a forged/degenerate emission whose only purpose is to drive CE to
+# (near) zero via float cancellation/underflow. Reject it.
+_MAX_ABS_LOGIT = 100.0
 
 
 def ce_from_topk_logits(
@@ -192,7 +193,7 @@ def reduce_blanked_nlls(
     eval_set_hash: str,
     tol_witness: float = 0.05,
     wrong_target_floor: float = 1.0,
-    wrong_target_max_low_frac: float = 0.5,
+    wrong_target_max_low_frac: float = 0.1,
 ) -> HostReduced:
     """HOST verdict over a HOSB blanked-grid NLL array. Re-runs no model.
 
