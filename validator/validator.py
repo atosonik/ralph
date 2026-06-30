@@ -41,7 +41,11 @@ from proof.real_attest import (
 )
 from proof.runner import _load_restricted_paths, scan_diff_for_exploit_patterns, scan_diff_for_restricted
 from proof.sources import compute_container_measurement
-from validator.integrity import check_compute_plausibility, check_recipe_config_matches_proof
+from validator.integrity import (
+    check_canonical_data_source,
+    check_compute_plausibility,
+    check_recipe_config_matches_proof,
+)
 
 # Hard-coded sanity bounds for the miner-submitted model config. The validator
 # loads checkpoint['config'] from an attacker-controlled file; without bounds
@@ -318,6 +322,9 @@ def op1_diff_and_integrity(
         ok_c, detail_c = check_compute_plausibility(final_state, calibration)
         if not ok_c:
             return False, detail_c
+        ok_d, detail_d = check_canonical_data_source(final_state)
+        if not ok_d:
+            return False, detail_d
         if patch_path.exists():
             ok_m, detail_m = check_recipe_config_matches_proof(
                 patch_path.read_text(encoding="utf-8", errors="replace"), final_state

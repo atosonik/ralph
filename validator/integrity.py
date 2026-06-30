@@ -23,6 +23,7 @@ checkpoints trip it. Returns (ok, reason); ok=False means reject as fraud/broken
 from __future__ import annotations
 
 import math
+import re
 
 # Reject if held-out loss >= this fraction of the random baseline ln(vocab).
 # A real ~254M model sits at ~3-4.5 nats/token; random is ~10.8 for vocab 50257.
@@ -202,3 +203,28 @@ def check_recipe_config_matches_proof(patch_text: str, final_state: dict) -> tup
         except (TypeError, ValueError):
             continue
     return True, "config matches proof"
+
+
+# Miner-host data paths a canonical run must never reference. The locked
+# canonical data_manifest is relative (e.g. "data/data_manifest.json"); a config
+# that points manifest_path/data_base_dir at /home, /mnt, … is a data-lock bypass
+# (the run trained on the miner's own data, possibly contaminated with the
+# held-out, then claimed the canonical recipe). The in-the-wild case:
+# manifest_path="/home/root/diony/recipe/data/data_manifest.json".
+_HOST_DATA_PATH_RE = re.compile(r"^\s*(?:~|\.\.)?/(?:home|root|mnt|media|srv|scratch|Users)\b")
+
+
+def check_canonical_data_source(final_state: dict) -> tuple[bool, str]:
+    """Reject a bundle whose training config points the data manifest/dir at a
+    miner-host path. NOTE: this lives in `final_state.config`, NOT the patch diff,
+    so the restricted/exploit patch scanners miss it — op1 must check it here.
+    Best-effort: skipped when there is no config. Returns (ok, reason)."""
+    cfg = (final_state or {}).get("config") or {}
+    for key in ("manifest_path", "data_base_dir", "data_dir", "data_path"):
+        v = cfg.get(key)
+        if isinstance(v, str) and _HOST_DATA_PATH_RE.match(v):
+            return False, (
+                f"non-canonical data source: config.{key}={v!r} is a miner-host path — "
+                f"the run bypassed the locked canonical data_manifest"
+            )
+    return True, "canonical data source"
