@@ -8,11 +8,61 @@ import pytest
 
 from validator.integrity import (
     check_checkpoint_trained,
+    check_compute_plausibility,
+    check_recipe_config_matches_proof,
     nats_per_token_from_bpb,
 )
 
 VOCAB = 50257
 RANDOM_NATS = math.log(VOCAB)  # ~10.82
+
+
+# --- compute-plausibility: anti compute-gaming -------------------------------
+H100 = {"gpu_name": "NVIDIA H100 80GB HBM3"}
+
+
+def test_rejects_fabricated_compute_the_5ctaoqf1_king():
+    # 5.557B tokens in 6788s on ONE H100 => 818k tok/s => ~126% MFU = impossible.
+    fs = {"tokens_seen": 5_557_452_800, "wall_clock_s": 6787.88, "n_params": 253_874_184}
+    ok, reason = check_compute_plausibility(fs, H100)
+    assert not ok and "fabricated compute" in reason and "MFU" in reason
+
+
+def test_accepts_a_real_30h_run():
+    fs = {"tokens_seen": 5_557_452_800, "wall_clock_s": 109_000, "n_params": 253_874_184}  # ~51k tok/s
+    assert check_compute_plausibility(fs, H100)[0]
+
+
+def test_accepts_an_optimized_run_under_the_ceiling():
+    fs = {"tokens_seen": 5_557_452_800, "wall_clock_s": 22_000, "n_params": 253_874_184}  # ~250k tok/s, ~39% MFU
+    assert check_compute_plausibility(fs, H100)[0]
+
+
+def test_incomplete_training_summary_is_skipped_not_rejected():
+    assert check_compute_plausibility({"tokens_seen": 0, "wall_clock_s": 0}, {})[0]
+    assert check_compute_plausibility({}, None)[0]
+
+
+def test_unknown_gpu_uses_fastest_peak_to_avoid_false_reject():
+    fs = {"tokens_seen": 5_557_452_800, "wall_clock_s": 22_000, "n_params": 253_874_184}
+    assert check_compute_plausibility(fs, {"gpu_name": "Some Future GPU"})[0]
+
+
+# --- declared-recipe-matches-proof -------------------------------------------
+def test_rejects_config_step_mismatch_the_5ctaoqf1_king():
+    patch = '+++ b/configs/muon_wsd_qknorm_b20593.json\n+{\n+  "total_steps": 40000,\n+  "qk_norm": true\n+}\n'
+    ok, reason = check_recipe_config_matches_proof(patch, {"steps": 10600})
+    assert not ok and "mismatch" in reason
+
+
+def test_accepts_matching_config_steps():
+    patch = '+++ b/configs/run.json\n+{\n+  "total_steps": 10600\n+}\n'
+    assert check_recipe_config_matches_proof(patch, {"steps": 10600})[0]
+
+
+def test_config_match_skips_when_no_config_or_no_steps():
+    assert check_recipe_config_matches_proof("+++ b/model/x.py\n+x = 1\n", {"steps": 10600})[0]
+    assert check_recipe_config_matches_proof('+++ b/configs/c.json\n+{"total_steps": 5}\n', {})[0]
 
 
 def test_rejects_the_uid155_random_king():

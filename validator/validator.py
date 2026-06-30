@@ -41,6 +41,7 @@ from proof.real_attest import (
 )
 from proof.runner import _load_restricted_paths, scan_diff_for_exploit_patterns, scan_diff_for_restricted
 from proof.sources import compute_container_measurement
+from validator.integrity import check_compute_plausibility, check_recipe_config_matches_proof
 
 # Hard-coded sanity bounds for the miner-submitted model config. The validator
 # loads checkpoint['config'] from an attacker-controlled file; without bounds
@@ -296,6 +297,33 @@ def op1_diff_and_integrity(
         exploit_hits = scan_diff_for_exploit_patterns(patch_text)
         if exploit_hits:
             return False, f"patch injects off-protocol inputs: {exploit_hits[0][0]} :: {exploit_hits[0][1]}"
+
+    # Compute-plausibility + declared-recipe-matches-proof (anti compute-gaming):
+    # wall_clock_s is miner-declared (not in bundle_hash), so it can be under-claimed
+    # to win the compute-weighted crown. Reject physically-impossible training
+    # throughput + a submitted config whose step count the proof never ran.
+    fs_path = proof_dir / "training" / "final_state.json"
+    if fs_path.exists():
+        try:
+            final_state = json.loads(fs_path.read_text(encoding="utf-8", errors="replace"))
+        except (ValueError, OSError):
+            final_state = {}
+        calibration: dict = {}
+        cal_path = proof_dir / "calibration.json"
+        if cal_path.exists():
+            try:
+                calibration = json.loads(cal_path.read_text(encoding="utf-8", errors="replace"))
+            except (ValueError, OSError):
+                calibration = {}
+        ok_c, detail_c = check_compute_plausibility(final_state, calibration)
+        if not ok_c:
+            return False, detail_c
+        if patch_path.exists():
+            ok_m, detail_m = check_recipe_config_matches_proof(
+                patch_path.read_text(encoding="utf-8", errors="replace"), final_state
+            )
+            if not ok_m:
+                return False, detail_m
 
     return True, "ok"
 
