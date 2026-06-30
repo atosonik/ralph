@@ -39,7 +39,7 @@ from proof.real_attest import (
 from proof.real_attest import (
     verify_attestation as verify_real_attestation,
 )
-from proof.runner import _load_restricted_paths, scan_diff_for_restricted
+from proof.runner import _load_restricted_paths, scan_diff_for_exploit_patterns, scan_diff_for_restricted
 from proof.sources import compute_container_measurement
 
 # Hard-coded sanity bounds for the miner-submitted model config. The validator
@@ -293,6 +293,9 @@ def op1_diff_and_integrity(
             violations = scan_diff_for_restricted(patch_text, patterns)
             if violations:
                 return False, f"patch touches restricted paths: {violations}"
+        exploit_hits = scan_diff_for_exploit_patterns(patch_text)
+        if exploit_hits:
+            return False, f"patch injects off-protocol inputs: {exploit_hits[0][0]} :: {exploit_hits[0][1]}"
 
     return True, "ok"
 
