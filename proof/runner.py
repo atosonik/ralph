@@ -442,6 +442,11 @@ def run_proof_test(
     # canonical training reads from that manifest, not the workdir copy, so the
     # shard byte-content is bound to the recipe checkout's manifest hash.
     train_cmd += ["--manifest", str((RECIPE_DIR / "data" / "data_manifest.json").resolve())]
+    # Pin the data base dir to the canonical recipe data tree (realpath-resolved so a
+    # relative symlink cannot escape). cfg.data_base_dir defaults to "data" but is
+    # miner-overridable; the runner -- not the miner config -- must choose WHERE shards
+    # resolve from, else a patch redirects the data (the /dstack class).
+    train_cmd += ["--data-base-dir", str((RECIPE_DIR / "data").resolve())]
     print(f"[proof] running training: {' '.join(train_cmd)}")
     train_result = subprocess.run(
         train_cmd,
@@ -479,6 +484,7 @@ def run_proof_test(
         + file_hash(checkpoint_path).encode()
         + file_hash(training_log_path).encode()
         + file_hash(cal_path).encode()
+        + file_hash(final_state_path).encode()
     )
 
     # 7. Build attestation chain (verified tier) or skip (unverified tier).

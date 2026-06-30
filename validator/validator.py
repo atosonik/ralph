@@ -245,6 +245,9 @@ def op1_diff_and_integrity(
     bundle_components.append(_file_sha256(proof_dir / "training" / "checkpoint.pt").encode())
     bundle_components.append(_file_sha256(proof_dir / "training" / "training_log.jsonl").encode())
     bundle_components.append(_file_sha256(proof_dir / "calibration.json").encode())
+    fs_path = proof_dir / "training" / "final_state.json"
+    if fs_path.exists():
+        bundle_components.append(_file_sha256(fs_path).encode())
     recomputed = hashlib.sha256(b"".join(bundle_components)).hexdigest()
     if submission_payload.get("bundle_hash") != recomputed:
         return False, (
