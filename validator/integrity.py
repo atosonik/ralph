@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import math
 import re
+from pathlib import Path
 
 # Reject if held-out loss >= this fraction of the random baseline ln(vocab).
 # A real ~254M model sits at ~3-4.5 nats/token; random is ~10.8 for vocab 50257.
@@ -205,29 +206,69 @@ def check_recipe_config_matches_proof(patch_text: str, final_state: dict) -> tup
     return True, "config matches proof"
 
 
-# Miner-host data paths a canonical run must never reference. The locked
-# canonical data_manifest is relative (e.g. "data/data_manifest.json"); a config
-# that points manifest_path/data_base_dir at /home, /mnt, … is a data-lock bypass
-# (the run trained on the miner's own data, possibly contaminated with the
-# held-out, then claimed the canonical recipe). The in-the-wild case:
-# manifest_path="/home/root/diony/recipe/data/data_manifest.json".
-# ALLOWLIST, not blocklist: canonical data lives at a container-RELATIVE path
-# (e.g. "data/data_manifest.json"), resolved inside the proof container against the
-# canonical recipe tree. ANY absolute path ("/..."), home ("~"), or parent-escape
-# ("..") points outside that tree to a miner-controlled location = a data-lock
-# bypass, regardless of the specific prefix. The old per-prefix blocklist
-# (/home|/mnt|...) missed /dstack; this matches every absolute/escaping path by
-# construction, so there is no prefix left to enumerate around.
+# Absolute / escaping config paths the FALLBACK guard rejects when the canonical
+# manifest hash can't be recomputed. In normal operation the CONTENT check in
+# check_canonical_data_source is authoritative, so an absolute path injected by
+# the #655 runner pin is the EXPECTED honest case; this regex only bites in the
+# degraded path where the canonical manifest is unavailable.
 _NONCANONICAL_PATH_RE = re.compile(r"^\s*(?:~|\.\.|/)")
 
 
+def _canonical_train_manifest_hash() -> str | None:
+    """Best-effort `manifest_hash()` of the validator's canonical training
+    data_manifest. Returns None if the canonical recipe/manifest can't be located
+    (the caller then degrades to the escape-only path guard). This lets the
+    data-lock be enforced by CONTENT, which is what data/manifest.py promises:
+    "the value extended into the proof-test attestation user_data so validators
+    can verify which manifest the miner trained against"."""
+    try:
+        from ralph_bootstrap import RECIPE_DIR  # canonical recipe checkout
+        import sys
+
+        rd = str(RECIPE_DIR)
+        if rd not in sys.path:
+            sys.path.insert(0, rd)
+        from data.manifest import DataManifest
+
+        return DataManifest.from_path(
+            Path(RECIPE_DIR) / "data" / "data_manifest.json"
+        ).manifest_hash()
+    except Exception:
+        return None
+
+
 def check_canonical_data_source(final_state: dict) -> tuple[bool, str]:
-    """Reject a bundle whose training config points the data manifest/dir outside
-    the canonical container-relative data tree. NOTE: this lives in
-    `final_state.config`, NOT the patch diff, so the restricted/exploit patch
-    scanners miss it — op1 must check it here. Best-effort: skipped when there is
-    no config. Returns (ok, reason)."""
-    cfg = (final_state or {}).get("config") or {}
+    """Reject a bundle that trained on non-canonical data.
+
+    The AUTHORITATIVE lock is CONTENT: `final_state.manifest_hash` (deterministic
+    over the manifest, and bound into bundle_hash by the proof so it is
+    tamper-evident) must equal the validator's canonical training-manifest hash.
+
+    This supersedes the previous absolute-path blocklist. That blocklist became
+    self-contradictory after #655: the runner now injects an ABSOLUTE realpath for
+    --manifest/--data-base-dir (proof/runner.py), recipe `main()` writes it into
+    cfg, and `final_state["config"]` records it via `asdict(cfg)` — so the
+    "reject any absolute path" rule rejected EVERY honest bundle (even the
+    validator's own /app/data re-run). It also never actually caught the original
+    threat (e.g. "/home/root/diony/recipe/data/data_manifest.json" ends in the
+    canonical suffix yet points at miner-controlled data) — a content hash does.
+
+    Best-effort: if the canonical manifest can't be hashed, fall back to the
+    escape-only path guard (~ and .. still rejected). Returns (ok, reason)."""
+    fs = final_state or {}
+    canonical = _canonical_train_manifest_hash()
+    mh = fs.get("manifest_hash")
+    if canonical and isinstance(mh, str) and mh:
+        if mh == canonical:
+            return True, "canonical data source (manifest_hash verified)"
+        return False, (
+            f"non-canonical data source: manifest_hash={mh[:16]}… != canonical "
+            f"training manifest {canonical[:16]}… — the run trained on different "
+            f"data than the locked data_manifest"
+        )
+    # Canonical manifest unavailable -> fall back to the original strict path
+    # guard (rejects absolute/escaping config paths).
+    cfg = fs.get("config") or {}
     for key in ("manifest_path", "data_base_dir", "data_dir", "data_path"):
         v = cfg.get(key)
         if isinstance(v, str) and v.strip() and _NONCANONICAL_PATH_RE.match(v):

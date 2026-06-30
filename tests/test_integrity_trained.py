@@ -100,6 +100,47 @@ def test_data_source_skips_when_no_config():
     assert check_canonical_data_source({"config": {}})[0]
 
 
+def test_content_lock_accepts_absolute_runner_path_when_hash_matches(monkeypatch):
+    # Since #655 the runner injects an ABSOLUTE realpath for --manifest/--data-base-dir;
+    # recipe main() writes it into cfg and final_state records it. The CONTENT lock
+    # (manifest_hash == canonical) must accept it — the old absolute-path blocklist
+    # rejected EVERY honest bundle (even the validator's own /app/data re-run).
+    import validator.integrity as _ig
+
+    canon = "a" * 64
+    monkeypatch.setattr(_ig, "_canonical_train_manifest_hash", lambda: canon)
+    fs = {
+        "manifest_hash": canon,
+        "config": {
+            "manifest_path": "/srv/proof/run0/data/data_manifest.json",
+            "data_base_dir": "/srv/proof/run0/data",
+        },
+    }
+    ok, reason = check_canonical_data_source(fs)
+    assert ok and "manifest_hash verified" in reason
+
+
+def test_content_lock_rejects_redirected_data_by_hash(monkeypatch):
+    # Trained on different data than the locked manifest -> caught by CONTENT even
+    # when the path looks canonical (the /home/.../diony case a path check misses).
+    import validator.integrity as _ig
+
+    monkeypatch.setattr(_ig, "_canonical_train_manifest_hash", lambda: "a" * 64)
+    fs = {"manifest_hash": "b" * 64, "config": {"manifest_path": "data/data_manifest.json"}}
+    ok, reason = check_canonical_data_source(fs)
+    assert not ok and "manifest_hash" in reason
+
+
+def test_falls_back_to_path_guard_when_canonical_unavailable(monkeypatch):
+    # If the canonical manifest can't be hashed, the original strict path guard
+    # still rejects absolute/escaping config paths.
+    import validator.integrity as _ig
+
+    monkeypatch.setattr(_ig, "_canonical_train_manifest_hash", lambda: None)
+    assert not check_canonical_data_source({"config": {"data_base_dir": "/mnt/scratch/data_50b"}})[0]
+    assert check_canonical_data_source({"config": {"data_base_dir": "data"}})[0]
+
+
 def test_rejects_the_uid155_random_king():
     # Measured in the incident: ~11.0 nats/token, log claimed final_loss 3.05.
     ok, reason = check_checkpoint_trained(11.0, VOCAB, claimed_final_loss=3.0496)
