@@ -7,6 +7,7 @@ import math
 import pytest
 
 from validator.integrity import (
+    check_canonical_data_source,
     check_checkpoint_trained,
     check_compute_plausibility,
     check_recipe_config_matches_proof,
@@ -63,6 +64,27 @@ def test_accepts_matching_config_steps():
 def test_config_match_skips_when_no_config_or_no_steps():
     assert check_recipe_config_matches_proof("+++ b/model/x.py\n+x = 1\n", {"steps": 10600})[0]
     assert check_recipe_config_matches_proof('+++ b/configs/c.json\n+{"total_steps": 5}\n', {})[0]
+
+
+# --- canonical data source (anti data-lock-bypass) ---------------------------
+def test_rejects_noncanonical_host_manifest_ea576b0a():
+    fs = {"config": {"manifest_path": "/home/root/diony/recipe/data/data_manifest.json", "data_base_dir": "data"}}
+    ok, reason = check_canonical_data_source(fs)
+    assert not ok and "non-canonical data source" in reason
+
+
+def test_rejects_mnt_data_base_dir():
+    assert not check_canonical_data_source({"config": {"data_base_dir": "/mnt/scratch/SN40/data_50b"}})[0]
+
+
+def test_accepts_canonical_relative_data_path_7fd43cef():
+    fs = {"config": {"manifest_path": "data/data_manifest.json", "data_base_dir": "data"}}
+    assert check_canonical_data_source(fs)[0]
+
+
+def test_data_source_skips_when_no_config():
+    assert check_canonical_data_source({})[0]
+    assert check_canonical_data_source({"config": {}})[0]
 
 
 def test_rejects_the_uid155_random_king():
