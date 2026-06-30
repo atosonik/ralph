@@ -18,9 +18,68 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ralph_bootstrap  # noqa: F401
-from proof.runner import _extract_diff_paths, scan_diff_for_restricted
+from proof.runner import (
+    _extract_diff_paths,
+    scan_diff_for_exploit_patterns,
+    scan_diff_for_restricted,
+)
 
 RESTRICTED = ["eval/**", "calibration/**", "validator/**", "proof/**", "restricted_files.yaml"]
+
+
+# --- scan_diff_for_exploit_patterns: off-protocol input-injection (proof-forgery) ---
+def _added(*lines: str) -> str:
+    return "+++ b/recipe/train.py\n" + "\n".join("+" + ln for ln in lines) + "\n"
+
+
+def test_warm_start_external_checkpoint_load_flagged():
+    # PR#586-class: train() loads an off-protocol checkpoint from the miner's box.
+    hits = scan_diff_for_exploit_patterns(
+        _added('_ws = torch.load("/home/jovyan/v10sub/checkpoint.pt", weights_only=True)')
+    )
+    assert hits and "external/host path" in hits[0][0]
+
+
+def test_noncanonical_data_path_flagged():
+    # PR#344-class: a config points the data dir at a host path -> bypasses the lock.
+    diff = '+++ b/configs/big.json\n+    "data_base_dir": "/mnt/scratch/SN40/data_50b",\n'
+    assert scan_diff_for_exploit_patterns(diff)
+
+
+def test_host_toolchain_path_flagged():
+    assert scan_diff_for_exploit_patterns(_added('_GCC = "/home/root/diony/toolchain/gcc"'))
+
+
+def test_abs_checkpoint_load_under_canonical_mount_flagged():
+    # staging weights under a canonical mount still loads a .pt by absolute path.
+    hits = scan_diff_for_exploit_patterns(_added('sd = torch.load("/data/staged/model.pt")'))
+    assert hits and "absolute path" in hits[0][0]
+
+
+def test_legit_lr_schedule_returns_clean():
+    # the false positives a naive return-scan produced (PR#585 / #413).
+    diff = _added(
+        "    def lr_at(step):",
+        "        return cfg.min_lr + (cfg.max_lr - cfg.min_lr) * frac",
+        "        return cfg.max_lr",
+    )
+    assert scan_diff_for_exploit_patterns(diff) == []
+
+
+def test_legit_relative_and_canonical_data_clean():
+    diff = _added(
+        '    shards = sorted(Path("data/shards").glob("*.bin"))',
+        '    manifest = json.load(open("/data/data_manifest.json"))',
+        '    ckpt = torch.load(out_dir / "checkpoint.pt")',
+        '    os.environ.setdefault("TRITON_CACHE_DIR", "/tmp/ralph_triton")',
+    )
+    assert scan_diff_for_exploit_patterns(diff) == []
+
+
+def test_removed_lines_not_scanned():
+    # a removal (`-`) referencing a host path must not trip the scanner.
+    diff = '+++ b/recipe/train.py\n-    x = torch.load("/home/old/ckpt.pt")\n'
+    assert scan_diff_for_exploit_patterns(diff) == []
 
 
 def test_clean_diff_does_not_match():

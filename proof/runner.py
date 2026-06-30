@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -272,6 +273,46 @@ def scan_diff_for_restricted(patch_text: str, restricted_patterns: list[str]) ->
     return violations
 
 
+# --- Off-protocol input-injection scan (proof-forgery class) ------------------
+#
+# A canonical recipe trains FROM SCRATCH and reads only the mounted canonical
+# data; it never references a host path or loads pre-trained weights. A miner
+# who patches train() to `torch.load("/home/.../checkpoint.pt")` (a model trained
+# off-protocol, mounted on their own CC box) or points the data dir at
+# `/mnt/.../data_50b` produces a bundle the attested run did NOT legitimately
+# train — the attestation still signs because the canonical image DID run the
+# recipe; the recipe just loaded a file. These patterns flag that class.
+#
+# This is a STATIC op1 gate (cheap, before any compute): necessary but NOT
+# sufficient — a determined miner can stage inputs under a canonical mount path.
+# The authoritative defense is sealed re-eval (re-run with no external mounts +
+# require the checkpoint to reproduce). It does stop the current in-the-wild
+# `torch.load("/home/.../checkpoint.pt")` + `/mnt/.../data` attempts.
+_EXTERNAL_PATH_RE = re.compile(r"""['"`](?:~|\.\.)?/(?:home|root|mnt|media|srv|scratch|Users)\b""")
+_WEIGHT_LOAD_RE = re.compile(
+    r"\b(?:torch\.load|pickle\.loads?|np\.load|numpy\.load|joblib\.load|load_file|safetensors\w*\.\w*load\w*)\s*\("
+)
+_ABS_WEIGHT_PATH_RE = re.compile(r"""['"`]/[^'"`]*\.(?:pt|pth|ckpt|safetensors|bin|pkl|npz)\b""")
+
+
+def scan_diff_for_exploit_patterns(patch_text: str) -> list[tuple[str, str]]:
+    """Flag ADDED recipe-patch lines that inject off-protocol inputs (the proof-
+    forgery class: load an externally-trained checkpoint or train on non-canonical
+    data the attested run never produced). Returns [(reason, offending_line)];
+    empty list = clean. Both op1 (validator-side, authoritative) and the
+    in-container runner reject on any hit."""
+    hits: list[tuple[str, str]] = []
+    for raw in patch_text.splitlines():
+        if not raw.startswith("+") or raw.startswith("+++"):
+            continue
+        body = raw[1:].strip()
+        if _EXTERNAL_PATH_RE.search(body):
+            hits.append(("references an external/host path (off-protocol input injection)", body[:200]))
+        elif _WEIGHT_LOAD_RE.search(body) and _ABS_WEIGHT_PATH_RE.search(body):
+            hits.append(("loads model weights from an absolute path (recipe must train from scratch)", body[:200]))
+    return hits
+
+
 def apply_patch(workdir: Path, patch_path: Path) -> None:
     """Apply a unified diff using `git apply` (no git repo needed with --3way? No,
     we use plain patch). We use `patch -p1` since it's simpler."""
@@ -342,6 +383,9 @@ def run_proof_test(
     violations = scan_diff_for_restricted(patch_text, restricted_patterns)
     if violations:
         raise RuntimeError(f"patch touches restricted paths: {violations}")
+    exploit_hits = scan_diff_for_exploit_patterns(patch_text)
+    if exploit_hits:
+        raise RuntimeError(f"patch injects off-protocol inputs: {exploit_hits}")
 
     # 3. Create a working copy of the canonical recipe and apply the patch.
     #    The recipe (model/, recipe/, data/, configs/) lives in the sibling
